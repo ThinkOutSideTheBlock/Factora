@@ -21,9 +21,12 @@ async function main() {
   console.log(`   2a. Searching subgraphs for "${searchKeyword}"...`);
   const searchResult = await agentTools.searchSubgraphs(searchKeyword);
   if (searchResult.isError) {
-    console.log('   ⚠ Search failed:', searchResult.error);
+    throw new Error(`Search failed: ${searchResult.error}`);
   } else {
     console.log(`   Found ${searchResult.resultsCount} subgraphs`);
+    if (searchResult.results.length === 0) {
+      throw new Error(`Search returned no subgraphs for "${searchKeyword}"`);
+    }
     if (searchResult.results.length > 0) {
       console.log('   Top 3 results:');
       searchResult.results.slice(0, 3).forEach((r, i) => {
@@ -51,8 +54,12 @@ async function main() {
     }`,
   );
   if (queryResult.isError) {
-    console.log('   ⚠ Query failed:', queryResult.error);
+    throw new Error(`Query failed: ${queryResult.error}`);
   } else {
+    const markets = (queryResult.data as { data?: { markets?: unknown[] } } | null)?.data?.markets;
+    if (!Array.isArray(markets) || markets.length === 0) {
+      throw new Error('Query returned no Aave USDC markets');
+    }
     console.log('   Response time:', queryResult.elapsedMs + 'ms');
     console.log('   Data:', JSON.stringify(queryResult.data, null, 2).slice(0, 500));
   }

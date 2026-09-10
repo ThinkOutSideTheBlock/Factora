@@ -143,17 +143,7 @@ export class GraphMcpClient {
       throw new Error(`MCP tool error: ${text}`);
     }
 
-    if (result.structuredContent != null) {
-      return result.structuredContent as Record<string, unknown>;
-    }
-
-    const text = result.content?.find((c) => c.type === 'text')?.text;
-    if (!text) return null;
-    try {
-      return JSON.parse(text) as Record<string, unknown>;
-    } catch {
-      return { raw: text };
-    }
+    return this.parseToolPayload(result);
   }
 
   async searchSubgraphs(
@@ -170,13 +160,7 @@ export class GraphMcpClient {
       throw new Error(`MCP tool error: ${text}`);
     }
 
-    const text = result.content?.find((c) => c.type === 'text')?.text;
-    if (!text) return null;
-    try {
-      return JSON.parse(text) as Record<string, unknown>;
-    } catch {
-      return { raw: text };
-    }
+    return this.parseToolPayload(result);
   }
 
   async close(): Promise<void> {
@@ -194,6 +178,21 @@ export class GraphMcpClient {
       if (transport) await transport.close();
     } catch {
       // already gone
+    }
+  }
+
+  private parseToolPayload(
+    result: McpToolCallResult,
+  ): Record<string, unknown> | null {
+    if (result.structuredContent != null) {
+      return result.structuredContent as Record<string, unknown>;
+    }
+    const text = result.content?.find((c) => c.type === 'text')?.text;
+    if (!text) return null;
+    try {
+      return JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      return { raw: text };
     }
   }
 }

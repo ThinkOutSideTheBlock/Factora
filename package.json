@@ -7,7 +7,7 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "test": "tsx test-step1.ts",
+    "test": "npm run test-graph",
     "test-graph": "vitest run",
     "test:watch": "vitest",
     "verify": "tsx src/graph/verify-graph-feed.ts",

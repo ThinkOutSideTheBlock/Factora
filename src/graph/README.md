@@ -17,8 +17,8 @@ npm install
 # Get a Graph API key at https://thegraph.com/studio/
 echo "GRAPH_API_KEY=your_key_here" > .env
 
-# Run tests (62 tests, ~400ms)
-npm test
+# Run graph tests (65 tests)
+npm run test-graph
 
 # Live verification
 npm run verify
@@ -76,6 +76,11 @@ const data = await agentTools.querySubgraph(
 - `querySubgraph` handles connection lifecycle (lazy init on first call)
 - Both tools track timing via `elapsedMs` for performance monitoring
 
+**Numeric convention:** all APYs in this module are decimal fractions (`0.0347`
+means `3.47%`). Convert to percentage points only at a presentation boundary.
+See [GRAPH_INTEGRATION_HANDOFF.md](./GRAPH_INTEGRATION_HANDOFF.md) before
+connecting this module to underwriting.
+
 ## Available MCP Tools
 
 The Graph's MCP server exposes these tools (accessible via `agentTools`):
@@ -103,7 +108,7 @@ src/graph/
 │   ├── graph-feed.service.ts # Engine A + Engine B (core service)
 │   ├── graph-mcp.client.ts  # MCP subprocess singleton
 │   └── agent-tools.ts       # LLM agent tool registry
-└── __tests__/               # 62 tests (vitest)
+└── __tests__/               # 65 tests (vitest)
     ├── index.test.ts
     ├── graph-feed.service.test.ts
     ├── graph-mcp.client.test.ts
@@ -120,7 +125,7 @@ src/graph/
 
 | Command              | Description                         |
 | -------------------- | ----------------------------------- |
-| `npm test`           | Run all 62 tests                    |
+| `npm test`           | Run all graph tests                 |
 | `npm run test:watch` | Watch mode for tests                |
 | `npm run verify`     | Live verification against The Graph |
 | `npm run typecheck`  | TypeScript type checking            |

@@ -289,6 +289,15 @@ describe('GraphMcpClient — searchSubgraphs', () => {
     expect(result).toEqual(mockResult);
   });
 
+  it('should return structuredContent from the search tool', async () => {
+    const mockResult = { total: 1, subgraphs: [{ id: 'abc123' }] };
+    mockCallTool.mockResolvedValueOnce({ structuredContent: mockResult });
+
+    const result = await client.searchSubgraphs('uniswap v3');
+
+    expect(result).toEqual(mockResult);
+  });
+
   it('should throw when search tool returns isError', async () => {
     mockCallTool.mockResolvedValueOnce({
       isError: true,

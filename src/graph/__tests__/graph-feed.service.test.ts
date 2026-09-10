@@ -174,6 +174,27 @@ describe('GraphFeedService — Rate Normalization', () => {
     expect(usdcRate!.borrowApy).toBeCloseTo(0.0512, 4);
   });
 
+  it('should normalize bridged USDC symbols to the canonical USDC asset', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () =>
+        buildMockMessariResponse([
+          { name: 'Aave USDC.e', symbol: 'USDC.e', tvl: '50000000', supplyRate: '3.63', borrowRate: '5.12' },
+        ]),
+    });
+    for (let i = 1; i < LENDING_SUBGRAPHS.length; i++) {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: { markets: [] }, errors: [] }),
+      });
+    }
+
+    const report = await service.getStandardizedLendingBenchmarks();
+
+    expect(report.detailedRates[0].symbol).toBe('USDC');
+    expect(report.benchmarks.USDC.averageSupplyApy).toBeCloseTo(0.0363, 4);
+  });
+
   it('should normalize Ray-scale rates (e.g. 3.63e25 → 0.0363)', async () => {
     // LENDING_SUBGRAPHS (5 active entries):
     //   [0] Aave v3 Ethereum, [1] Aave v3 Arbitrum,
@@ -506,6 +527,8 @@ describe('GraphFeedService — Fallback Resilience', () => {
     expect(report.detailedRates.length).toBeGreaterThan(0);
     expect(report.benchmarks.USDC.marketsCount).toBe(1);
     expect(report.benchmarks.USDC.averageSupplyApy).toBeCloseTo(0.05, 4);
+    expect(report.benchmarks.USDT.averageSupplyApy).toBeCloseTo(0.051, 4);
+    expect(report.benchmarks.DAI.averageSupplyApy).toBeCloseTo(0.062, 4);
   });
 });
 

@@ -36,13 +36,41 @@ interface UniswapPool {
   }>;
 }
 
-const BASELINE_USDC: AssetBenchmark = {
-  symbol: 'USDC',
-  averageSupplyApy: 0.048,
-  maxSupplyApy: 0.052,
-  minSupplyApy: 0.044,
-  topMarket: 'Aave v3 (Ethereum)',
-  marketsCount: 2,
+const ASSET_SYMBOLS = ['USDC', 'USDT', 'DAI'] as const;
+const ASSET_ALIASES: Record<string, (typeof ASSET_SYMBOLS)[number]> = {
+  USDC: 'USDC',
+  'USDC.E': 'USDC',
+  USDBC: 'USDC',
+  USDCN: 'USDC',
+  USDT: 'USDT',
+  DAI: 'DAI',
+};
+
+const FALLBACK_BENCHMARKS: Record<string, AssetBenchmark> = {
+  USDC: {
+    symbol: 'USDC',
+    averageSupplyApy: 0.048,
+    maxSupplyApy: 0.052,
+    minSupplyApy: 0.044,
+    topMarket: 'Aave v3 (Ethereum)',
+    marketsCount: 2,
+  },
+  USDT: {
+    symbol: 'USDT',
+    averageSupplyApy: 0.051,
+    maxSupplyApy: 0.055,
+    minSupplyApy: 0.047,
+    topMarket: 'Compound v3 (Ethereum)',
+    marketsCount: 2,
+  },
+  DAI: {
+    symbol: 'DAI',
+    averageSupplyApy: 0.062,
+    maxSupplyApy: 0.065,
+    minSupplyApy: 0.058,
+    topMarket: 'Aave v3 (Ethereum)',
+    marketsCount: 2,
+  },
 };
 
 export class GraphFeedService {
@@ -144,8 +172,9 @@ export class GraphFeedService {
     market: MessariMarket,
     out: ProtocolMarketRate[],
   ): void {
-    const symbol = market.inputToken?.symbol?.toUpperCase();
-    if (!symbol || !['USDC', 'USDT', 'DAI'].includes(symbol)) return;
+    const rawSymbol = market.inputToken?.symbol?.toUpperCase();
+    const symbol = rawSymbol ? ASSET_ALIASES[rawSymbol] : undefined;
+    if (!symbol) return;
     if (!market.rates || market.rates.length === 0) return;
 
     let supplyRate = 0;
@@ -168,7 +197,7 @@ export class GraphFeedService {
       symbol,
       supplyApy: Number(supplyRate.toFixed(4)),
       borrowApy: Number(borrowRate.toFixed(4)),
-      totalValueLockedUSD: Number(market.totalValueLockedUSD || 0),
+      totalValueLockedUSD: this.toFiniteNonNegativeNumber(market.totalValueLockedUSD),
     });
   }
 
@@ -176,10 +205,10 @@ export class GraphFeedService {
     rawRates: ProtocolMarketRate[],
   ): Record<string, AssetBenchmark> {
     const benchmarks: Record<string, AssetBenchmark> = {};
-    for (const sym of ['USDC', 'USDT', 'DAI']) {
+    for (const sym of ASSET_SYMBOLS) {
       const matching = rawRates.filter((r) => r.symbol === sym && r.supplyApy > 0);
       if (matching.length === 0) {
-        benchmarks[sym] = { ...BASELINE_USDC, symbol: sym };
+        benchmarks[sym] = { ...FALLBACK_BENCHMARKS[sym] };
         continue;
       }
       const avg =
@@ -209,17 +238,20 @@ export class GraphFeedService {
 
     // Annualize realized supply-side fee revenue over the snapshot window.
     const hours = Math.min(snapshots.length, 24);
-    const feeRevenue = snapshots
-      .slice(0, hours)
-      .reduce((acc, s) => acc + Number(s.hourlySupplySideRevenueUSD || 0), 0);
-    const avgTvl =
-      snapshots
-        .slice(0, hours)
-        .reduce((acc, s) => acc + Number(s.totalValueLockedUSD || 0), 0) / hours;
+    const window = snapshots.slice(0, hours);
+    const revenues = window.map((snapshot) =>
+      Number(snapshot.hourlySupplySideRevenueUSD),
+    );
+    const tvls = window.map((snapshot) => Number(snapshot.totalValueLockedUSD));
+    if (revenues.some((value) => !Number.isFinite(value)) || tvls.some((value) => !Number.isFinite(value))) {
+      return null;
+    }
+    const feeRevenue = revenues.reduce((acc, value) => acc + value, 0);
+    const avgTvl = tvls.reduce((acc, value) => acc + value, 0) / hours;
     if (avgTvl <= 0) return null;
 
     const annualized = (feeRevenue / hours) * 24 * 365 / avgTvl;
-    const tvlUsd = Number(pool.totalValueLockedUSD || 0);
+    const tvlUsd = this.toFiniteNonNegativeNumber(pool.totalValueLockedUSD);
     if (!Number.isFinite(annualized) || tvlUsd <= 0) return null;
 
     return {
@@ -250,35 +282,17 @@ export class GraphFeedService {
   private getFallbackReport(): MultiAssetBenchmarkReport {
     return {
       timestamp: Date.now(),
-      benchmarks: {
-        USDC: {
-          symbol: 'USDC',
-          averageSupplyApy: 0.048,
-          maxSupplyApy: 0.052,
-          minSupplyApy: 0.044,
-          topMarket: 'Aave v3 (Ethereum)',
-          marketsCount: 2,
-        },
-        USDT: {
-          symbol: 'USDT',
-          averageSupplyApy: 0.051,
-          maxSupplyApy: 0.055,
-          minSupplyApy: 0.047,
-          topMarket: 'Compound v3 (Ethereum)',
-          marketsCount: 2,
-        },
-        DAI: {
-          symbol: 'DAI',
-          averageSupplyApy: 0.062,
-          maxSupplyApy: 0.065,
-          minSupplyApy: 0.058,
-          topMarket: 'Aave v3 (Ethereum)',
-          marketsCount: 2,
-        },
-      },
+      benchmarks: Object.fromEntries(
+        ASSET_SYMBOLS.map((symbol) => [symbol, { ...FALLBACK_BENCHMARKS[symbol] }]),
+      ),
       detailedRates: [],
       source: 'The Graph Gateway (Deterministic Baseline Fallback)',
     };
+  }
+
+  private toFiniteNonNegativeNumber(value: string): number {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
   }
 }
 
