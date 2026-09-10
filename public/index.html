@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Factora | ClaimFlow Dashboard</title>
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="navbar">
+      <div class="logo-area">
+        <div class="logo-icon">⚡</div>
+        <div class="logo-text">
+          <h1>Factora <span>/ ClaimFlow</span></h1>
+          <p class="subtitle">Decentralized Debt & Invoice Purchasing Platform</p>
+        </div>
+      </div>
+      
+      <div class="nav-controls">
+        <div class="status-indicator" id="serverStatusBadge">
+          <span class="status-dot"></span>
+          <span id="serverStatusText">Checking Server...</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="tab-bar">
+      <button class="tab-btn active" id="tabBtnProposals" onclick="switchTab('proposals')">
+        <span class="tab-icon">📋</span> Proposals & Pool
+      </button>
+      <button class="tab-btn" id="tabBtnMatchmaking" onclick="switchTab('matchmaking')">
+        <span class="tab-icon">🔎</span> Proposal Matchmaker
+      </button>
+      <button class="tab-btn" id="tabBtnX402" onclick="switchTab('x402')">
+        <span class="tab-icon">🛡️</span> x402 Payment Gate
+      </button>
+    </nav>
+
+    <!-- TAB 1: Proposals -->
+    <main id="tabProposals" class="tab-content active">
+      <div class="grid-2col">
+        <!-- Proposal Creator Card -->
+        <section class="card glass-panel">
+          <div class="card-header">
+            <h2>Create Debt Proposal</h2>
+            <span class="badge badge-primary">Step 1 Ready</span>
+          </div>
+          <p class="card-desc">List debt or invoice receivables at a discount to obtain upfront liquidity.</p>
+
+          <form id="createProposalForm" onsubmit="handleCreateProposal(event)">
+            <div class="form-group">
+              <div class="label-row">
+                <label for="proposerAddress">Proposer EVM Address</label>
+                <button type="button" class="btn-text" onclick="generateRandomAddress()">🎲 Random Address</button>
+              </div>
+              <input 
+                type="text" 
+                id="proposerAddress" 
+                placeholder="0x71C8366420A8004b553A3Ed0B8679B7F13cDb82a" 
+                required 
+              />
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="nominalAmount">Nominal Amount ($)</label>
+                <input 
+                  type="number" 
+                  id="nominalAmount" 
+                  placeholder="10000" 
+                  min="1" 
+                  step="any" 
+                  required 
+                  oninput="updateApyPreview()"
+                />
+              </div>
+
+              <div class="form-group">
+                <label for="requiredAmount">Required Amount ($)</label>
+                <input 
+                  type="number" 
+                  id="requiredAmount" 
+                  placeholder="9000" 
+                  min="1" 
+                  step="any" 
+                  required 
+                  oninput="updateApyPreview()"
+                />
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="returnDateInDays">Maturity Duration (Days)</label>
+              <input 
+                type="number" 
+                id="returnDateInDays" 
+                placeholder="90" 
+                min="1" 
+                required 
+                oninput="updateApyPreview()"
+              />
+            </div>
+
+            <!-- Live APY Calculation Preview -->
+            <div class="apy-preview-box" id="apyPreviewBox">
+              <div class="apy-preview-info">
+                <span class="apy-label">Estimated Annualized Yield (APY)</span>
+                <span class="apy-value" id="previewApyValue">0.00%</span>
+              </div>
+              <div class="apy-formula" id="apyFormulaDetails">
+                Yield: $0 (0%) | Duration: 0 days
+              </div>
+            </div>
+
+            <!-- Error Banner -->
+            <div id="proposalErrorBox" class="alert-box error-box hidden"></div>
+            <!-- Success Banner -->
+            <div id="proposalSuccessBox" class="alert-box success-box hidden"></div>
+
+            <button type="submit" id="submitProposalBtn" class="btn btn-primary btn-block">
+              <span id="btnText">Publish Debt Proposal</span>
+              <span id="btnSpinner" class="spinner hidden"></span>
+            </button>
+          </form>
+        </section>
+
+        <!-- Live Proposals Pool Card -->
+        <section class="card glass-panel">
+          <div class="card-header">
+            <div>
+              <h2>Proposals Pool</h2>
+              <p class="card-desc">Active debt proposals currently in storage.</p>
+            </div>
+            <div class="pool-actions">
+              <select id="statusFilter" onchange="loadProposals()" class="select-input">
+                <option value="">All Statuses</option>
+                <option value="PENDING">PENDING</option>
+                <option value="ACCEPTED">ACCEPTED</option>
+              </select>
+              <button class="btn btn-secondary btn-icon" onclick="loadProposals()" title="Refresh Pool">🔄</button>
+            </div>
+          </div>
+
+          <div class="pool-stats">
+            <div class="stat-pill">
+              <span class="stat-label">Total Proposals</span>
+              <span class="stat-val" id="totalProposalsCount">0</span>
+            </div>
+            <div class="stat-pill">
+              <span class="stat-label">Avg APY</span>
+              <span class="stat-val" id="avgApyVal">0.0%</span>
+            </div>
+            <div class="stat-pill">
+              <span class="stat-label">Total Nominal Volume</span>
+              <span class="stat-val" id="totalVolumeVal">$0</span>
+            </div>
+          </div>
+
+          <div class="table-container">
+            <div id="proposalsLoading" class="loading-state">
+              <div class="spinner"></div>
+              <span>Fetching proposals...</span>
+            </div>
+
+            <div id="proposalsEmpty" class="empty-state hidden">
+              <span class="empty-icon">📭</span>
+              <p>No proposals found in storage.</p>
+              <small>Create your first proposal using the form on the left.</small>
+            </div>
+
+            <div id="proposalsList" class="proposals-list"></div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- TAB 2: Free Matchmaker + Paid Smart Report -->
+    <main id="tabMatchmaking" class="tab-content">
+      <div class="card glass-panel">
+        <div class="card-header">
+          <div>
+            <h2>Proposal Matchmaker</h2>
+            <p class="card-desc">Free deterministic filtering. Find pending proposals that meet the buyer's criteria.</p>
+          </div>
+          <span class="badge badge-success">Free</span>
+        </div>
+
+        <div class="grid-matchmaker">
+          <div class="search-params-panel">
+            <h3>Buyer Constraints</h3>
+            <form id="buyerSearchForm" onsubmit="handleBuyerSearch(event)">
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Nominal Min ($)</label>
+                  <input type="number" id="buyerAmountMin" value="1000" />
+                </div>
+                <div class="form-group">
+                  <label>Nominal Max ($)</label>
+                  <input type="number" id="buyerAmountMax" value="50000" />
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Duration Min (Days)</label>
+                  <input type="number" id="buyerDurationMin" value="15" />
+                </div>
+                <div class="form-group">
+                  <label>Duration Max (Days)</label>
+                  <input type="number" id="buyerDurationMax" value="180" />
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label>Minimum Required APY (%)</label>
+                <input type="number" id="buyerApyMin" value="12" step="0.1" />
+              </div>
+
+              <button type="submit" class="btn btn-primary btn-block">
+                <span>Find Matching Proposals</span>
+              </button>
+            </form>
+          </div>
+
+          <div class="results-panel">
+            <div id="matchmakerResultsContainer" class="matchmaker-results">
+              <div class="info-placeholder">
+                <span>🔎</span>
+                <p>Set buyer constraints to see matching pending proposals.</p>
+              </div>
+            </div>
+            <button id="smartReportBtn" class="btn btn-secondary btn-block smart-report-trigger hidden" type="button" onclick="handleSmartReport()">
+              <span>✨ Generate Smart Report</span>
+              <span class="badge badge-warning">Paid</span>
+            </button>
+          </div>
+        </div>
+
+        <section id="smartReportSection" class="smart-report-section hidden" aria-live="polite">
+          <div class="smart-report-header">
+            <div>
+              <h3><span class="spark">✦</span> AI Smart Report</h3>
+              <p>LLM underwriting, market benchmark context, and a ranked recommendation for every match.</p>
+            </div>
+            <div class="report-header-actions">
+              <div class="report-actions hidden" id="reportActions">
+                <button class="btn btn-secondary btn-icon" type="button" onclick="copyReportSummary()" title="Copy report summary">📋</button>
+                <button class="btn btn-secondary btn-icon" type="button" onclick="downloadReportJson()" title="Export raw JSON">⬇️</button>
+              </div>
+              <span class="badge badge-warning">Paid service</span>
+            </div>
+          </div>
+          <div class="report-meta hidden" id="reportMeta"></div>
+          <div id="smartReportContainer" class="info-placeholder">
+            <span>✨</span>
+            <p>Generate a report to see AI underwriting insights.</p>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- TAB 3: x402 Payment Gate -->
+    <main id="tabX402" class="tab-content">
+      <div class="card glass-panel">
+        <div class="card-header">
+          <div>
+            <h2>x402 Payment Gate Controller & Inspector</h2>
+            <p class="card-desc">Simulate and test HTTP 402 Payment Required monetization challenges.</p>
+          </div>
+          <span class="badge badge-warning">Step 2 Milestone</span>
+        </div>
+
+        <div class="x402-layout">
+          <div class="x402-settings">
+            <h3>Payment Simulation Config</h3>
+            <div class="form-group">
+              <label>Simulate Preimage / Auth Header</label>
+              <input type="text" id="x402HeaderInput" placeholder="e.g. valid-preimage-token-123" />
+            </div>
+            <button class="btn btn-secondary btn-block" onclick="testProtectedEndpoint()">
+              Test Protected Endpoint
+            </button>
+          </div>
+
+          <div class="x402-response-viewer">
+            <h3>Response Inspector</h3>
+            <pre id="x402InspectorOutput" class="code-block">// Waiting for request...</pre>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <p>Factora / ClaimFlow &bull; Local Testing Environment &bull; Port: 3000</p>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
