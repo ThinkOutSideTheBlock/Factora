@@ -185,6 +185,34 @@ describe('searchSubgraphs', () => {
     });
   });
 
+  it('should map the current MCP subgraphs response shape', async () => {
+    mockSearchSubgraphs.mockResolvedValueOnce({
+      returned: 1,
+      total: 82,
+      subgraphs: [
+        {
+          id: 'uniswap-v3-id',
+          metadata: { displayName: 'Uniswap V3 Ethereum' },
+          currentVersion: {
+            subgraphDeployment: { ipfsHash: 'QmUniswapHash' },
+          },
+        },
+      ],
+    });
+
+    const result = await searchSubgraphs('uniswap v3');
+
+    expect(result.isError).toBe(false);
+    expect(result.resultsCount).toBe(82);
+    expect(result.results).toEqual([
+      {
+        subgraphId: 'uniswap-v3-id',
+        displayName: 'Uniswap V3 Ethereum',
+        currentDeploymentIpfsHash: 'QmUniswapHash',
+      },
+    ]);
+  });
+
   it('should handle null response (MCP returned nothing)', async () => {
     mockSearchSubgraphs.mockResolvedValueOnce(null);
 

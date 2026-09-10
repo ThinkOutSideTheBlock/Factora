@@ -36,19 +36,38 @@ export async function searchSubgraphs(
 ): Promise<SubgraphSearchResponse & { isError: boolean; error?: string }> {
   try {
     const raw = await graphMcpClient.searchSubgraphs(keyword);
-    const results = Array.isArray(raw?.results) ? raw.results : [];
+    const rawResults = Array.isArray(raw?.results)
+      ? raw.results
+      : Array.isArray(raw?.subgraphs)
+        ? raw.subgraphs
+        : [];
     return {
       keyword: typeof raw?.keyword === 'string' ? raw.keyword : keyword,
       resultsCount:
-        typeof raw?.resultsCount === 'number' ? raw.resultsCount : results.length,
-      results: results.map((result) => ({
+        typeof raw?.resultsCount === 'number'
+          ? raw.resultsCount
+          : typeof raw?.total === 'number'
+            ? raw.total
+            : rawResults.length,
+      results: rawResults.map((result) => ({
         subgraphId:
-          typeof result?.subgraphId === 'string' ? result.subgraphId : '',
+          typeof result?.subgraphId === 'string'
+            ? result.subgraphId
+            : typeof result?.id === 'string'
+              ? result.id
+              : '',
         displayName:
-          typeof result?.displayName === 'string' ? result.displayName : '',
+          typeof result?.displayName === 'string'
+            ? result.displayName
+            : typeof result?.metadata?.displayName === 'string'
+              ? result.metadata.displayName
+              : '',
         currentDeploymentIpfsHash:
           typeof result?.currentDeploymentIpfsHash === 'string'
             ? result.currentDeploymentIpfsHash
+            : typeof result?.currentVersion?.subgraphDeployment?.ipfsHash ===
+                'string'
+              ? result.currentVersion.subgraphDeployment.ipfsHash
             : null,
       })),
       isError: false,

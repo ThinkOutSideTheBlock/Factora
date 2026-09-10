@@ -17,8 +17,9 @@ async function main() {
   console.log('2. Testing Dynamic MCP Tools (Agent Interface)...');
 
   // 2a. Search for subgraphs by keyword
-  console.log('   2a. Searching subgraphs for "uniswap v3"...');
-  const searchResult = await agentTools.searchSubgraphs('uniswap v2');
+  const searchKeyword = 'uniswap v3';
+  console.log(`   2a. Searching subgraphs for "${searchKeyword}"...`);
+  const searchResult = await agentTools.searchSubgraphs(searchKeyword);
   if (searchResult.isError) {
     console.log('   ⚠ Search failed:', searchResult.error);
   } else {
