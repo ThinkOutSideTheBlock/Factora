@@ -1227,3 +1227,64 @@ input:focus,
   margin-top: auto;
   padding-top: 20px;
 }
+
+/* ---------- x402 Payment Panel ---------- */
+.payment-panel {
+  border: 1px solid rgba(245, 185, 66, 0.35);
+  background: rgba(245, 185, 65, 0.06);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-top: 10px;
+}
+
+.payment-panel-title {
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: var(--accent-amber, #f5b941);
+}
+
+.payment-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.payment-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.8rem;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.payment-row span {
+  color: var(--text-dim);
+}
+
+.payment-row strong {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+  word-break: break-all;
+  text-align: right;
+}
+
+.payment-panel .btn {
+  width: 100%;
+}
+
+.payment-note {
+  margin-top: 10px;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.success-box small,
+#proposalSuccessBox small {
+  display: inline-block;
+  margin-top: 4px;
+  opacity: 0.85;
+  word-break: break-all;
+}

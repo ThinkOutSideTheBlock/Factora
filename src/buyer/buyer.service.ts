@@ -7,11 +7,16 @@ import {
     BuyerSearchRequest,
     BuyerSearchResponse,
     MatchmakingResultItem,
+    SmartReportRequest,
+    SmartReportResponse,
 } from "./buyer.model.js";
+import {
+    computeBudgetedAmount,
+    getSmartReportPricingConfig,
+} from "../x402/pricing.js";
 
 /**
- * Stage 1: In-Memory Hard Filter
- * Excludes proposals that do not match the buyer's deterministic requirements.
+ * Stage 1: in-memory hard filter for buyer constraints.
  */
 export function filterProposals(
     proposals: Proposal[],
@@ -30,10 +35,7 @@ export function filterProposals(
     });
 }
 
-/**
- * Free matchmaking service. It performs only the deterministic hard filter and
- * intentionally does not read market data or call the LLM.
- */
+/** Free matchmaking: deterministic hard filter only — no market data, no LLM. */
 export async function searchProposals(
     criteria: BuyerSearchRequest,
 ): Promise<BuyerMatchResponse> {
@@ -46,13 +48,21 @@ export async function searchProposals(
     };
 }
 
-/**
- * Paid smart-report service. Payment middleware can be mounted on this route
- * without changing the free matchmaking flow.
- */
+/** Paid smart report: priced from the declared token budget, with a usage receipt. */
 export async function generateSmartReport(
-    criteria: BuyerSearchRequest,
-): Promise<BuyerSearchResponse> {
+    criteria: SmartReportRequest,
+): Promise<SmartReportResponse> {
+    const pricing = getSmartReportPricingConfig();
+    const budgetedTokens = criteria.maxTokens ?? pricing.maxTokens;
+    const budgetedAmountTinybars = computeBudgetedAmount(budgetedTokens, pricing);
+
+    const pricingInfo = {
+        strategy: 'declared-budget-per-token' as const,
+        budgetedTokens,
+        budgetedAmountTinybars,
+        config: pricing,
+    };
+
     const freeMatch = await searchProposals(criteria);
     const filteredCandidates = freeMatch.proposals;
     const marketBenchmark = await getMarketBenchmark();
@@ -64,11 +74,13 @@ export async function generateSmartReport(
                 "No pending proposals match the buyer requirements.",
             marketBenchmark,
             results: [],
+            pricing: pricingInfo,
+            usage: null,
         };
     }
 
-    // Stage 2: AI Underwriter Evaluation
-    const aiAnalysis = await evaluateProposalsWithAI(
+    // Stage 2: AI Underwriter Evaluation (metered)
+    const { analysis: aiAnalysis, usage } = await evaluateProposalsWithAI(
         filteredCandidates,
         criteria,
         marketBenchmark,
@@ -100,5 +112,13 @@ export async function generateSmartReport(
         overallSummary: aiAnalysis.overallSummary,
         marketBenchmark,
         results,
+        pricing: pricingInfo,
+        usage: usage
+            ? {
+                  ...usage,
+                  budgetedTokens,
+                  chargedTinybars: budgetedAmountTinybars,
+              }
+            : null,
     };
 }

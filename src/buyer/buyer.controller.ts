@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { BuyerSearchRequest, BuyerSearchSchema } from './buyer.model.js';
+import { BuyerSearchRequest, BuyerSearchSchema, SmartReportRequest, SmartReportSchema } from './buyer.model.js';
 import { generateSmartReport, searchProposals } from './buyer.service.js';
 import { validateBody } from '../common/validate.middleware.js';
 
@@ -26,14 +26,16 @@ buyerRouter.post(
 
 /**
  * POST /api/buyer/smart-report
- * Paid-service boundary: x402 middleware will protect this route.
+ * Paid-service boundary: x402 middleware protects this route with DYNAMIC
+ * per-token pricing (see src/x402/pricing.ts). The optional `maxTokens` field
+ * in the body is priced before this handler runs.
  */
 buyerRouter.post(
   '/smart-report',
-  validateBody(BuyerSearchSchema),
+  validateBody(SmartReportSchema),
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const criteria = req.body as BuyerSearchRequest;
+      const criteria = req.body as SmartReportRequest;
       const response = await generateSmartReport(criteria);
       res.status(200).json(response);
     } catch (error) {

@@ -30,6 +30,48 @@ export const BuyerSearchSchema = z
 
 export type BuyerSearchRequest = z.infer<typeof BuyerSearchSchema>;
 
+/* ── Smart Report (paid, per-token metered) ────────────────────────────────── */
+
+import {
+    getSmartReportPricingConfig,
+    type SmartReportPricingConfig,
+} from "../x402/pricing.js";
+import type { LlmUsage } from "../underwriter/llm.client.js";
+
+const smartReportPricing = getSmartReportPricingConfig();
+
+/** Same constraints as a buyer search, plus an optional token budget for pricing. */
+export const SmartReportSchema = BuyerSearchSchema.extend({
+    maxTokens: z
+        .number()
+        .int()
+        .min(smartReportPricing.minTokens)
+        .max(smartReportPricing.maxTokens)
+        .optional(),
+});
+
+export type SmartReportRequest = z.infer<typeof SmartReportSchema>;
+
+/** Transparent billing info attached to every paid smart-report response. */
+export interface SmartReportPricingInfo {
+    strategy: 'declared-budget-per-token';
+    budgetedTokens: number;
+    budgetedAmountTinybars: string;
+    config: SmartReportPricingConfig;
+}
+
+export interface SmartReportUsage extends LlmUsage {
+    /** Token budget the client declared (and was charged for). */
+    budgetedTokens: number;
+    /** Amount actually charged on-chain, in tinybars. */
+    chargedTinybars: string;
+}
+
+export interface SmartReportResponse extends BuyerSearchResponse {
+    pricing: SmartReportPricingInfo;
+    usage: SmartReportUsage | null;
+}
+
 export interface MatchmakingResultItem {
     proposal: Proposal;
     evaluation: AgentMatchResult;

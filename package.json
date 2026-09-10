@@ -10,6 +10,10 @@
     "test": "tsx test-step1.ts"
   },
   "dependencies": {
+    "@x402/core": "^2.25.0",
+    "@x402/express": "^2.25.0",
+    "@x402/fetch": "^2.25.0",
+    "@x402/hedera": "^2.25.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",

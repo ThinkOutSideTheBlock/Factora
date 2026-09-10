@@ -90,6 +90,65 @@ function generateRandomAddress() {
   document.getElementById('proposerAddress').value = addr;
 }
 
+// ---------- In-browser x402 payment panel ----------
+// Renders the decoded 402 invoice and lets the user pay through the agent.
+
+function renderPaymentPanelHtml(contextKey, payLabel) {
+  const invoice = (pendingPayments[contextKey] || {}).invoice;
+  const req = invoice && invoice.accepts && invoice.accepts[0];
+  if (!req) {
+    return '<div class="alert-box error-box">⚠️ Payment required, but the invoice header could not be decoded.</div>';
+  }
+  const hbar = hbarFromTinybars(req.amount);
+  return `
+    <div class="payment-panel">
+      <div class="payment-panel-title">🛡️ Payment required — x402 challenge received</div>
+      <div class="payment-grid">
+        <div class="payment-row"><span>Price</span><strong>${hbar} HBAR</strong></div>
+        <div class="payment-row"><span>Network</span><strong>${req.network}</strong></div>
+        <div class="payment-row"><span>Scheme</span><strong>${req.scheme}</strong></div>
+        <div class="payment-row"><span>Pay to (service)</span><strong>${req.payTo}</strong></div>
+        <div class="payment-row"><span>Fee payer (Blocky402)</span><strong>${(req.extra && req.extra.feePayer) || '—'}</strong></div>
+      </div>
+      <button class="btn btn-primary" onclick="payPendingPayment('${contextKey}')">
+        💸 ${payLabel} (${hbar} HBAR)
+      </button>
+      <p class="payment-note">Signed server-side by the agent wallet, settled via the Blocky402 facilitator. Your browser never holds keys.</p>
+    </div>
+  `;
+}
+
+async function payPendingPayment(contextKey) {
+  const pending = pendingPayments[contextKey];
+  if (!pending) return;
+  pending.busy = true;
+  await pending.onPay();
+}
+
+// ---------- Proposal creation with x402 ----------
+async function publishProposalViaAgent(payload) {
+  const errBox = document.getElementById('proposalErrorBox');
+  const succBox = document.getElementById('proposalSuccessBox');
+
+  errBox.innerHTML = '<div class="payment-panel">⏳ Signing payment & settling on Hedera… this takes ~2-3 seconds.</div>';
+  errBox.classList.remove('hidden');
+
+  const { ok, data } = await payViaAgent('/api/proposals', payload);
+
+  if (ok && data.data && data.data.proposal) {
+    errBox.classList.add('hidden');
+    const txLine = settlementText(data.settlement);
+    succBox.innerHTML = `✓ Proposal created! ID: ${data.data.proposal.id.substring(0, 8)}… | APY: ${data.data.proposal.apy}%${txLine ? `<br><small>${txLine}</small>` : ''}`;
+    succBox.classList.remove('hidden');
+    document.getElementById('createProposalForm').reset();
+    updateApyPreview();
+    await loadProposals();
+  } else {
+    errBox.innerHTML = `<div class="alert-box error-box">⚠️ ${escapeHtml((data && data.error) || 'Agent payment failed')}</div>`;
+  }
+  delete pendingPayments.proposal;
+}
+
 // Create Proposal API Call
 async function handleCreateProposal(e) {
   e.preventDefault();
@@ -120,6 +179,19 @@ async function handleCreateProposal(e) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ proposerAddress, amount, requiredAmount, returnDateInDays })
     });
+
+    // x402 gate: unpaid request → decode invoice, offer agent payment.
+    if (res.status === 402) {
+      const invoice = decodePaymentRequired(res);
+      pendingPayments.proposal = {
+        invoice,
+        onPay: () => publishProposalViaAgent({ proposerAddress, amount, requiredAmount, returnDateInDays })
+      };
+      succBox.classList.add('hidden');
+      errBox.innerHTML = renderPaymentPanelHtml('proposal', 'Pay & Publish Proposal');
+      errBox.classList.remove('hidden');
+      return;
+    }
 
     const data = await res.json();
 
@@ -245,23 +317,48 @@ function renderProposals(proposals) {
   }).join('');
 }
 
-// Placeholder for Step 2: x402 Protected Endpoint Tester
-async function testProtectedEndpoint() {
-  const headerVal = document.getElementById('x402HeaderInput').value.trim();
-  const outputEl = document.getElementById('x402InspectorOutput');
+// ---------- x402 helpers ----------
+// The browser never holds private keys: it can *inspect* the 402 invoice and
+// delegate the actual payment to the backend payer agent (/api/agent/*).
 
-  outputEl.textContent = '// Sending request to POST /api/proposals with test header...';
+// Per-context pending invoices waiting for the user to press "Pay".
+const pendingPayments = {};
 
-  const headers = { 'Content-Type': 'application/json' };
-  if (headerVal) {
-    headers['X-Payment-Preimage'] = headerVal;
-    headers['Authorization'] = `Bearer ${headerVal}`;
+function decodePaymentRequired(res) {
+  const b64 = res.headers.get('payment-required');
+  if (!b64) return null;
+  try {
+    return JSON.parse(atob(b64));
+  } catch {
+    return null;
   }
+}
+
+function hbarFromTinybars(tinybars) {
+  const hbar = Number(tinybars) / 100000000;
+  return String(parseFloat(hbar.toFixed(6)));
+}
+
+function settlementText(settlement) {
+  if (!settlement) return '';
+  const tx = settlement.transaction || settlement.transactionId || '';
+  const network = String(settlement.network || 'hedera:testnet').replace('hedera:', '');
+  const link = tx
+    ? ` — https://hashscan.io/${network}/transaction/${encodeURIComponent(tx)}`
+    : '';
+  return `Settlement tx: ${tx}${link}`;
+}
+
+// ---------- x402 Tab: live protocol inspector ----------
+
+async function sendUnpaidRequest() {
+  const outputEl = document.getElementById('x402InspectorOutput');
+  outputEl.textContent = '// ① POST /api/proposals without payment → expecting HTTP 402…';
 
   try {
     const res = await fetch('/api/proposals', {
       method: 'POST',
-      headers,
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         proposerAddress: '0x1111111111111111111111111111111111111111',
         amount: 5000,
@@ -270,25 +367,99 @@ async function testProtectedEndpoint() {
       })
     });
 
-    const resHeaders = {};
-    res.headers.forEach((val, key) => { resHeaders[key] = val; });
-
-    let body;
-    try {
-      body = await res.json();
-    } catch {
-      body = await res.text();
-    }
+    const invoice = decodePaymentRequired(res);
+    const req = invoice && invoice.accepts && invoice.accepts[0];
 
     outputEl.textContent = JSON.stringify({
-      status: res.status,
+      step: '① unpaid request',
+      httpStatus: res.status,
       statusText: res.statusText,
-      responseHeaders: resHeaders,
-      responseBody: body
+      decodedInvoice: invoice,
+      interpretation: req ? {
+        scheme: req.scheme,
+        network: req.network,
+        price: `${hbarFromTinybars(req.amount)} HBAR (${req.amount} tinybars)`,
+        payTo: req.payTo,
+        facilitatorFeePayer: req.extra && req.extra.feePayer,
+        nextStep: 'Retry with X-PAYMENT header containing a partially-signed Hedera TransferTransaction'
+      } : null
     }, null, 2);
   } catch (err) {
     outputEl.textContent = '// Request Error:\n' + err.message;
   }
+}
+
+async function payFromAgent() {
+  const outputEl = document.getElementById('x402InspectorOutput');
+  const btn = document.getElementById('agentPayBtn');
+  btn.disabled = true;
+  outputEl.textContent = '// ② Agent is signing the Hedera TransferTransaction → paying via Blocky402…';
+
+  try {
+    const res = await fetch('/api/agent/paid-request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        path: '/api/proposals',
+        payload: {
+          proposerAddress: '0x1111111111111111111111111111111111111111',
+          amount: 5000,
+          requiredAmount: 4500,
+          returnDateInDays: 30
+        }
+      })
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      outputEl.textContent = '// Agent payment failed:\n' + JSON.stringify(data, null, 2);
+      return;
+    }
+
+    outputEl.textContent = JSON.stringify({
+      step: '② Paid request completed',
+      finalHttpStatus: data.httpStatus,
+      settlement: data.settlement,
+      paidResource: data.data
+    }, null, 2);
+  } catch (err) {
+    outputEl.textContent = '// Agent payment error:\n' + err.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function checkAgentStatus() {
+  const badge = document.getElementById('agentStatusBadge');
+  const text = document.getElementById('agentStatusText');
+  const payBtn = document.getElementById('agentPayBtn');
+  try {
+    const res = await fetch('/api/agent/status');
+    const data = await res.json();
+    if (data.configured) {
+      badge.className = 'status-indicator online';
+      text.textContent = `Agent ${data.accountId} · ${data.network}`;
+      payBtn.disabled = false;
+    } else {
+      badge.className = 'status-indicator offline';
+      text.textContent = 'Not configured (set HEDERA_AGENT_* in .env)';
+      payBtn.disabled = true;
+    }
+  } catch {
+    badge.className = 'status-indicator offline';
+    text.textContent = 'Agent status unavailable';
+  }
+}
+
+// Agent-backed payment used by the proposal form and the smart report.
+async function payViaAgent(path, payload) {
+  const res = await fetch('/api/agent/paid-request', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, payload })
+  });
+  const data = await res.json();
+  return { ok: res.ok, data };
 }
 
 function getBuyerCriteria() {
@@ -652,6 +823,42 @@ function downloadReportJson() {
   flashReportMeta('⬇️ Report JSON exported');
 }
 
+// Paid smart report via the x402 agent — runs after the user accepts the invoice.
+async function generateReportViaAgent() {
+  const section = document.getElementById('smartReportSection');
+  const container = document.getElementById('smartReportContainer');
+  const metaEl = document.getElementById('reportMeta');
+
+  if (!latestBuyerCriteria) return;
+
+  section.classList.remove('hidden');
+  container.className = 'smart-report-container';
+  container.innerHTML = reportSkeletonHtml();
+
+  const { ok, data } = await payViaAgent('/api/buyer/smart-report', latestBuyerCriteria);
+
+  if (!ok || !data.data || typeof data.data.count === 'undefined') {
+    container.className = 'info-placeholder';
+    container.innerHTML = `<div class="alert-box error-box">⚠️ ${escapeHtml((data && data.error) || 'Agent payment failed')}</div>`;
+    delete pendingPayments.smartReport;
+    return;
+  }
+
+  latestReportData = { ...data.data, generatedAt: new Date().toISOString() };
+  renderSmartReport(container, latestReportData);
+  animateReport(container);
+
+  const usage = latestReportData.usage;
+  const usageLine = usage && usage.totalTokens
+    ? `${usage.totalTokens} LLM tokens · charged ${hbarFromTinybars(usage.chargedTinybars)} HBAR · `
+    : '';
+  metaEl.textContent = `Underwriter agent · ${usageLine}${settlementText(data.settlement)}`;
+  metaEl.classList.remove('hidden');
+  document.getElementById('reportActions').classList.remove('hidden');
+  section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  delete pendingPayments.smartReport;
+}
+
 // Paid smart-report service: calls the LLM only after the buyer requests it.
 async function handleSmartReport() {
   if (!latestBuyerCriteria) return;
@@ -675,6 +882,20 @@ async function handleSmartReport() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(latestBuyerCriteria)
     });
+
+    // x402 gate: unpaid request → show per-token price and offer agent payment.
+    if (res.status === 402) {
+      const invoice = decodePaymentRequired(res);
+      pendingPayments.smartReport = {
+        invoice,
+        onPay: generateReportViaAgent
+      };
+      button.disabled = false;
+      container.className = 'smart-report-container';
+      container.innerHTML = renderPaymentPanelHtml('smartReport', 'Pay & Generate Report');
+      return;
+    }
+
     const data = await res.json();
 
     if (!res.ok) {
@@ -703,5 +924,6 @@ async function handleSmartReport() {
 document.addEventListener('DOMContentLoaded', () => {
   checkServerHealth();
   loadProposals();
+  checkAgentStatus();
   setInterval(checkServerHealth, 10000);
 });

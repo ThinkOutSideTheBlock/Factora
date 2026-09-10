@@ -271,22 +271,34 @@
       <div class="card glass-panel">
         <div class="card-header">
           <div>
-            <h2>x402 Payment Gate Controller & Inspector</h2>
-            <p class="card-desc">Simulate and test HTTP 402 Payment Required monetization challenges.</p>
+            <h2>x402 Payment Gate — Live Protocol Inspector</h2>
+            <p class="card-desc">Run the real x402 flow: unpaid request → HTTP 402 challenge from the Blocky402 facilitator → agent pays in HBAR → on-chain settlement receipt.</p>
           </div>
-          <span class="badge badge-warning">Step 2 Milestone</span>
+          <span class="badge badge-success">Live on Hedera</span>
         </div>
 
         <div class="x402-layout">
           <div class="x402-settings">
-            <h3>Payment Simulation Config</h3>
+            <h3>Payment Flow Simulator</h3>
+
             <div class="form-group">
-              <label>Simulate Preimage / Auth Header</label>
-              <input type="text" id="x402HeaderInput" placeholder="e.g. valid-preimage-token-123" />
+              <label>Agent Wallet (payer)</label>
+              <div class="status-indicator offline" id="agentStatusBadge">
+                <span class="status-dot"></span>
+                <span id="agentStatusText">Checking agent wallet…</span>
+              </div>
             </div>
-            <button class="btn btn-secondary btn-block" onclick="testProtectedEndpoint()">
-              Test Protected Endpoint
+
+            <button class="btn btn-secondary btn-block" onclick="sendUnpaidRequest()">
+              ① Send Unpaid Request (expect 402)
             </button>
+            <button class="btn btn-primary btn-block" id="agentPayBtn" onclick="payFromAgent()" style="margin-top: 10px;" disabled>
+              ② Pay with Agent Wallet (0.001 HBAR)
+            </button>
+            <p class="card-desc" id="agentHint" style="margin-top: 8px;">
+              Enable step ② by setting <code>HEDERA_AGENT_ACCOUNT_ID</code> and
+              <code>HEDERA_AGENT_PRIVATE_KEY</code> in <code>.env</code> (fund the account with testnet HBAR).
+            </p>
           </div>
 
           <div class="x402-response-viewer">

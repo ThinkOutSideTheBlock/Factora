@@ -20008,5 +20008,95 @@
     "apy": 45.06,
     "status": "PENDING",
     "createdAt": "2026-09-09T15:13:18.414Z"
+  },
+  {
+    "id": "d834705e-655e-47e2-b99e-66c0287aada8",
+    "proposerAddress": "0x44da5683106bd26cdadf7ec9051371a6d10237dc",
+    "amount": 1000,
+    "requiredAmount": 980,
+    "returnDateInDays": 50,
+    "apy": 14.9,
+    "status": "PENDING",
+    "createdAt": "2026-09-10T14:25:19.198Z"
+  },
+  {
+    "id": "6ffc82f2-afa2-4bf9-b29e-730637a61ded",
+    "proposerAddress": "0x1111111111111111111111111111111111111111",
+    "amount": 5000,
+    "requiredAmount": 4500,
+    "returnDateInDays": 30,
+    "apy": 135.19,
+    "status": "PENDING",
+    "createdAt": "2026-09-10T16:22:11.306Z"
+  },
+  {
+    "id": "793d6b79-5d82-4afc-96ec-05a31c6c53fb",
+    "proposerAddress": "0x1111111111111111111111111111111111111111",
+    "amount": 5000,
+    "requiredAmount": 4500,
+    "returnDateInDays": 30,
+    "apy": 135.19,
+    "status": "PENDING",
+    "createdAt": "2026-09-10T16:27:16.550Z"
+  },
+  {
+    "id": "486ff118-0167-4c05-bd44-851565ac706d",
+    "proposerAddress": "0x1111111111111111111111111111111111111111",
+    "amount": 5000,
+    "requiredAmount": 4500,
+    "returnDateInDays": 30,
+    "apy": 135.19,
+    "status": "PENDING",
+    "createdAt": "2026-09-10T16:28:51.246Z"
+  },
+  {
+    "id": "18e240af-51fc-4de6-8bb6-b136f87f057f",
+    "proposerAddress": "0x1111111111111111111111111111111111111111",
+    "amount": 5000,
+    "requiredAmount": 4500,
+    "returnDateInDays": 30,
+    "apy": 135.19,
+    "status": "PENDING",
+    "createdAt": "2026-09-10T16:29:02.189Z"
+  },
+  {
+    "id": "e2819a33-7200-4397-885b-c0a7663bc784",
+    "proposerAddress": "0x1111111111111111111111111111111111111111",
+    "amount": 5000,
+    "requiredAmount": 4500,
+    "returnDateInDays": 30,
+    "apy": 135.19,
+    "status": "PENDING",
+    "createdAt": "2026-09-10T16:45:52.964Z"
+  },
+  {
+    "id": "29e63587-2811-4202-adf1-5114d4e43e68",
+    "proposerAddress": "0xa230208f0ac239ed8ed9673819eea11b108a2ddc",
+    "amount": 15000,
+    "requiredAmount": 14800,
+    "returnDateInDays": 30,
+    "apy": 16.44,
+    "status": "PENDING",
+    "createdAt": "2026-09-10T17:16:45.252Z"
+  },
+  {
+    "id": "d8211f67-0ba3-466b-99a8-0ce3e16b62d5",
+    "proposerAddress": "0x3d42e8b3d85332884b08012117f3fcc6672fda39",
+    "amount": 1000,
+    "requiredAmount": 900,
+    "returnDateInDays": 30,
+    "apy": 135.19,
+    "status": "PENDING",
+    "createdAt": "2026-09-10T17:29:08.408Z"
+  },
+  {
+    "id": "0ea8b3b3-ee5c-4745-9742-948ab7dab464",
+    "proposerAddress": "0x8a7a050bf378ad5efb000b9d221c42353df102eb",
+    "amount": 100000,
+    "requiredAmount": 98000,
+    "returnDateInDays": 60,
+    "apy": 12.41,
+    "status": "PENDING",
+    "createdAt": "2026-09-10T20:59:14.478Z"
   }
 ]
