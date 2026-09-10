@@ -30,14 +30,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // directly (not the singleton) so each test gets a fresh instance with no
 // shared state between test cases.
 // ---------------------------------------------------------------------------
-import { GraphFeedService } from '../graph-feed.service';
-import { LENDING_SUBGRAPHS, MESSARI_MULTI_ASSET_QUERY } from '../subgraphs.config';
+import { GraphFeedService } from '../graph-feed/graph-feed.service.js';
+import { LENDING_SUBGRAPHS, MESSARI_MULTI_ASSET_QUERY } from '../graph-feed/subgraphs.config.js';
 
 import type {
   ProtocolMarketRate,
   AssetBenchmark,
   MultiAssetBenchmarkReport,
-} from '../graph-feed.types';
+} from '../graph-feed/graph-feed.types.js';
 
 // ---------------------------------------------------------------------------
 // MOCK: global fetch
@@ -53,14 +53,14 @@ vi.stubGlobal('fetch', mockFetch);
 // controlled data (or throw) so we can test the service's fallback logic
 // in isolation.
 // ---------------------------------------------------------------------------
-vi.mock('../graph-mcp.client', () => ({
+vi.mock('../graph-feed/graph-mcp.client.js', () => ({
   graphMcpClient: {
     queryDynamic: vi.fn(),
     close: vi.fn(),
   },
 }));
 
-import { graphMcpClient } from '../graph-mcp.client';
+import { graphMcpClient } from '../graph-feed/graph-mcp.client.js';
 const mockQueryDynamic = vi.mocked(graphMcpClient.queryDynamic);
 
 // ===========================================================================

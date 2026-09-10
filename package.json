@@ -10,7 +10,7 @@
     "test": "tsx test-step1.ts",
     "test-graph": "vitest run",
     "test:watch": "vitest",
-    "verify": "tsx verify-graph-feed.ts",
+    "verify": "tsx src/graph/verify-graph-feed.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -29,6 +29,7 @@
     "@types/uuid": "^10.0.0",
     "dotenv": "^17.4.2",
     "tsx": "^4.23.13",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
   }
 }

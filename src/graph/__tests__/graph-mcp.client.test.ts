@@ -53,7 +53,7 @@ vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => ({
 }));
 
 // Import AFTER mocks so the dynamic import inside the class picks up our mocks.
-import { GraphMcpClient } from '../graph-mcp.client';
+import { GraphMcpClient } from '../graph-feed/graph-mcp.client.js';
 
 describe('GraphMcpClient — Lifecycle', () => {
   let client: GraphMcpClient;

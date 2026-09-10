@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { graphFeedService, graphMcpClient, agentTools } from './src/graph-feed';
+import { graphFeedService, graphMcpClient, agentTools } from './graph-feed/index.js';
 
 async function main() {
   console.log('--- Starting Graph Feed Verification ---\n');

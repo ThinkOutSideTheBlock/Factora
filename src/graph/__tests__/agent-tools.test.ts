@@ -41,7 +41,7 @@ const { mockQueryDynamic, mockSearchSubgraphs } = vi.hoisted(() => ({
   mockSearchSubgraphs: vi.fn(),
 }));
 
-vi.mock('../graph-mcp.client', () => ({
+vi.mock('../graph-feed/graph-mcp.client.js', () => ({
   graphMcpClient: {
     queryDynamic: mockQueryDynamic,
     searchSubgraphs: mockSearchSubgraphs,
@@ -50,7 +50,7 @@ vi.mock('../graph-mcp.client', () => ({
 }));
 
 // Import AFTER mock so the mock is used by the module under test.
-import { querySubgraph, searchSubgraphs, agentTools } from '../agent-tools';
+import { querySubgraph, searchSubgraphs, agentTools } from '../graph-feed/agent-tools.js';
 
 // ===========================================================================
 // TEST SUITE: querySubgraph

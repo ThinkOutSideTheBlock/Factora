@@ -3,14 +3,14 @@ import {
   AssetBenchmark,
   ProtocolMarketRate,
   LpPoolBenchmark,
-} from './graph-feed.types';
+} from './graph-feed.types.js';
 import {
   LENDING_SUBGRAPHS,
   MESSARI_MULTI_ASSET_QUERY,
   UNISWAP_V3_ETHEREUM_SUBGRAPH_ID,
   UNISWAP_TOP_STABLE_POOLS_QUERY,
-} from './subgraphs.config';
-import { graphMcpClient } from './graph-mcp.client';
+} from './subgraphs.config.js';
+import { graphMcpClient } from './graph-mcp.client.js';
 
 interface MessariRate {
   rate: string;

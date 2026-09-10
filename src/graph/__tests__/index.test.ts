@@ -13,7 +13,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import * as graphFeed from '../index';
+import * as graphFeed from '../index.js';
 
 describe('graph-feed barrel exports', () => {
   it('should export the GraphFeedService class', () => {

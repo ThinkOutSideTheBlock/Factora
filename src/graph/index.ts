@@ -1,1 +1,1 @@
-export * from './graph-feed';
+export * from './graph-feed/index.js';
