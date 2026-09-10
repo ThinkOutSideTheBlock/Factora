@@ -1,8 +1,8 @@
 export interface SubgraphTarget {
-  protocol: string;
-  chain: string;
-  subgraphId: string;
-  schema: 'messari-standardized' | 'custom';
+    protocol: string;
+    chain: string;
+    subgraphId: string;
+    schema: "messari-standardized" | "custom";
 }
 
 // Messari standardized lending subgraphs verified live against The Graph
@@ -14,27 +14,50 @@ export interface SubgraphTarget {
 //   ─────────────  ────────  ────────  ────
 //   Aave v3        ✅        ✅        ❌ (no allocations on network)
 //   Compound v3    ✅        ✅        ❌ (no Messari deployment)
-//   Morpho Aave    ✅        ❌        ❌
-//   Morpho Compound❌ (bad indexers)
+//   Morpho blue    ?           ?         ?
 //
 // Missing Messari deployments are excluded — the agent falls back to
 // baseline rates when fewer sources return data.
 export const LENDING_SUBGRAPHS: SubgraphTarget[] = [
-  // ── Aave v3 ──────────────────────────────────────────────────────────
-  { protocol: 'Aave v3', chain: 'Ethereum', subgraphId: 'JCNWRypm7FYwV8fx5HhzZPSFaMxgkPuw4TnR3Gpi81zk', schema: 'messari-standardized' },
-  { protocol: 'Aave v3', chain: 'Arbitrum', subgraphId: '4xyasjQeREe7PxnF6wVdobZvCw5mhoHZq3T7guRpuNPf', schema: 'messari-standardized' },
-  // { protocol: 'Aave v3', chain: 'Base',     subgraphId: 'D7mapexM5ZsQckLJai2FawTKXJ7CqYGKM8PErnS3cJi9', schema: 'messari-standardized' }, // stale — no allocations
+    // ── Aave v3 ──────────────────────────────────────────────────────────
+    {
+        protocol: "Aave v3",
+        chain: "Ethereum",
+        subgraphId: "JCNWRypm7FYwV8fx5HhzZPSFaMxgkPuw4TnR3Gpi81zk",
+        schema: "messari-standardized",
+    },
+    {
+        protocol: "Aave v3",
+        chain: "Arbitrum",
+        subgraphId: "4xyasjQeREe7PxnF6wVdobZvCw5mhoHZq3T7guRpuNPf",
+        schema: "messari-standardized",
+    },
+    // { protocol: 'Aave v3', chain: 'Base',     subgraphId: 'D7mapexM5ZsQckLJai2FawTKXJ7CqYGKM8PErnS3cJi9', schema: 'messari-standardized' }, // stale — no allocations
 
-  // ── Compound v3 ──────────────────────────────────────────────────────
-  { protocol: 'Compound v3', chain: 'Ethereum', subgraphId: 'AwoxEZbiWLvv6e3QdvdMZw4WDURdGbvPfHmZRc8Dpfz9', schema: 'messari-standardized' },
-  { protocol: 'Compound v3', chain: 'Arbitrum', subgraphId: '5MjRndNWGhqvNX7chUYLQDnvEgc8DaH8eisEkcJt71SR', schema: 'messari-standardized' },
-  // NOTE: Compound v3 Base subgraph (2hcXhs…yTsijo) uses a custom
-  // schema — excluded to keep all queries unified.
+    // ── Compound v3 ──────────────────────────────────────────────────────
+    {
+        protocol: "Compound v3",
+        chain: "Ethereum",
+        subgraphId: "AwoxEZbiWLvv6e3QdvdMZw4WDURdGbvPfHmZRc8Dpfz9",
+        schema: "messari-standardized",
+    },
+    {
+        protocol: "Compound v3",
+        chain: "Arbitrum",
+        subgraphId: "5MjRndNWGhqvNX7chUYLQDnvEgc8DaH8eisEkcJt71SR",
+        schema: "messari-standardized",
+    },
+    // NOTE: Compound v3 Base subgraph (2hcXhs…yTsijo) uses a custom
+    // schema — excluded to keep all queries unified.
 
-  // ── Morpho (Aave V3 market) ──────────────────────────────────────────
-  { protocol: 'Morpho Aave', chain: 'Ethereum', subgraphId: 'FKe6ANnWmGPE6hajGLoTgPrVF2jYPHiRu2Jwcg9ZmG9A', schema: 'messari-standardized' },
+    // ── Morpho (Aave V3 market) ──────────────────────────────────────────
+    {
+        protocol: "Morpho Aave",
+        chain: "Ethereum",
+        subgraphId: "FKe6ANnWmGPE6hajGLoTgPrVF2jYPHiRu2Jwcg9ZmG9A",
+        schema: "messari-standardized",
+    },
 ];
-
 
 // Unified Messari pattern: rates are percentage APY ("3.63" = 3.63%); ordered
 // by TVL so the deepest-liquidity market ranks first. Bridged variants
@@ -63,7 +86,7 @@ export const MESSARI_MULTI_ASSET_QUERY = `
 // stable pools for comparative LP yield, with hourly supply-side fee revenue
 // snapshots used to annualize an estimated APY.
 export const UNISWAP_V3_ETHEREUM_SUBGRAPH_ID =
-  '4cKy6QQMc5tpfdx8yxfYeb9TLZmgLQe44ddW1G7NwkA6';
+    "4cKy6QQMc5tpfdx8yxfYeb9TLZmgLQe44ddW1G7NwkA6";
 
 export const UNISWAP_TOP_STABLE_POOLS_QUERY = `
   query TopStablePools {
