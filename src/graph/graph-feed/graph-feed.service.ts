@@ -7,6 +7,7 @@ import {
 import {
   LENDING_SUBGRAPHS,
   MESSARI_MULTI_ASSET_QUERY,
+  MIN_TVL_USD,
   UNISWAP_V3_ETHEREUM_SUBGRAPH_ID,
   UNISWAP_TOP_STABLE_POOLS_QUERY,
 } from './subgraphs.config.js';
@@ -20,7 +21,8 @@ interface MessariRate {
 
 interface MessariMarket {
   name: string | null;
-  inputToken?: { symbol: string };
+  isActive?: boolean;
+  inputToken?: { id?: string; symbol: string };
   totalValueLockedUSD: string;
   rates: MessariRate[];
 }
@@ -73,6 +75,9 @@ const FALLBACK_BENCHMARKS: Record<string, AssetBenchmark> = {
   },
 };
 
+const TARGET_TIMEOUT_MS = 30_000;
+const TARGET_RETRY_BACKOFF_MS = 250;
+
 export class GraphFeedService {
   private readonly apiKey: string;
 
@@ -89,38 +94,9 @@ export class GraphFeedService {
     const rawRates: ProtocolMarketRate[] = [];
 
     const fetches = LENDING_SUBGRAPHS.map(async (target) => {
-      const endpoint = `https://gateway.thegraph.com/api/${this.apiKey}/subgraphs/id/${target.subgraphId}`;
-      try {
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: MESSARI_MULTI_ASSET_QUERY }),
-          signal: AbortSignal.timeout(15_000),
-        });
-        if (!res.ok) {
-          console.warn(
-            `[GraphFeed] HTTP ${res.status} querying ${target.protocol} on ${target.chain}`,
-          );
-          return;
-        }
-        const body = (await res.json()) as {
-          data?: { markets?: MessariMarket[] | null };
-          errors?: Array<{ message: string }>;
-        };
-        if (body.errors && body.errors.length > 0) {
-          console.warn(
-            `[GraphFeed] GraphQL error from ${target.protocol} on ${target.chain}: ${body.errors[0].message}`,
-          );
-          return;
-        }
-        for (const market of body.data?.markets ?? []) {
-          this.collectMarketRate(target, market, rawRates);
-        }
-      } catch (err) {
-        console.warn(
-          `[GraphFeed] Failed querying ${target.protocol} on ${target.chain}:`,
-          err instanceof Error ? err.message : err,
-        );
+      const markets = await this.fetchMarketsWithRetry(target);
+      for (const market of markets) {
+        this.collectMarketRate(target, market, rawRates);
       }
     });
 
@@ -130,10 +106,16 @@ export class GraphFeedService {
       return this.getFallbackReport();
     }
 
+    // Q1/Q2 hardening: a single (protocol, chain, symbol) may still surface
+    // more than once when a subgraph lists both native and bridged markets
+    // as active (e.g. USDCn vs USDC.e). Keep only the deepest-liquidity
+    // market per key so benchmarks are never diluted.
+    const rates = this.deduplicateByDeepestTvl(rawRates);
+
     return {
       timestamp: Date.now(),
-      benchmarks: this.aggregateBenchmarks(rawRates),
-      detailedRates: rawRates,
+      benchmarks: this.aggregateBenchmarks(rates),
+      detailedRates: rates,
       source: 'The Graph Decentralized Network (Messari Standardized)',
     };
   }
@@ -167,26 +149,94 @@ export class GraphFeedService {
     }
   }
 
+  /**
+   * Query a single Messari target with one automatic retry. The Morpho Blue
+   * deployments are substreams-based and can exceed a tight timeout on cold
+   * gateway routes, so the per-target timeout is generous and a transient
+   * failure gets a second chance before the target is skipped. Deterministic
+   * failures (HTTP != 2xx, GraphQL errors) return empty without retrying.
+   */
+  private async fetchMarketsWithRetry(
+    target: { protocol: string; chain: string; subgraphId: string },
+  ): Promise<MessariMarket[]> {
+    try {
+      return await this.fetchMarkets(target);
+    } catch (err) {
+      console.warn(
+        `[GraphFeed] Failed querying ${target.protocol} on ${target.chain} (${
+          err instanceof Error ? err.message : err
+        }); retrying once`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, TARGET_RETRY_BACKOFF_MS));
+    try {
+      return await this.fetchMarkets(target);
+    } catch (err) {
+      console.warn(
+        `[GraphFeed] Retry failed for ${target.protocol} on ${target.chain}:`,
+        err instanceof Error ? err.message : err,
+      );
+      return [];
+    }
+  }
+
+  private async fetchMarkets(target: {
+    protocol: string;
+    chain: string;
+    subgraphId: string;
+  }): Promise<MessariMarket[]> {
+    const endpoint = `https://gateway.thegraph.com/api/${this.apiKey}/subgraphs/id/${target.subgraphId}`;
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: MESSARI_MULTI_ASSET_QUERY }),
+      signal: AbortSignal.timeout(TARGET_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      console.warn(
+        `[GraphFeed] HTTP ${res.status} querying ${target.protocol} on ${target.chain}`,
+      );
+      return [];
+    }
+    const body = (await res.json()) as {
+      data?: { markets?: MessariMarket[] | null };
+      errors?: Array<{ message: string }>;
+    };
+    if (body.errors && body.errors.length > 0) {
+      console.warn(
+        `[GraphFeed] GraphQL error from ${target.protocol} on ${target.chain}: ${body.errors[0].message}`,
+      );
+      return [];
+    }
+    return body.data?.markets ?? [];
+  }
+
   private collectMarketRate(
     target: { protocol: string; chain: string },
     market: MessariMarket,
     out: ProtocolMarketRate[],
   ): void {
+    // Q1: paused/frozen markets never enter benchmarks (client-side guard;
+    // the shared query also filters server-side). Undefined in mocks = keep.
+    if (market.isActive === false) return;
+
     const rawSymbol = market.inputToken?.symbol?.toUpperCase();
     const symbol = rawSymbol ? ASSET_ALIASES[rawSymbol] : undefined;
     if (!symbol) return;
     if (!market.rates || market.rates.length === 0) return;
 
+    // Q2: dust markets are excluded as defense in depth (isolated Morpho
+    // Blue micro-markets can be worth single-digit dollars).
+    const tvl = this.toFiniteNonNegativeNumber(market.totalValueLockedUSD);
+    if (tvl < MIN_TVL_USD) return;
+
     let supplyRate = 0;
     let borrowRate = 0;
     for (const r of market.rates) {
       if (r.type !== 'VARIABLE') continue;
-      let val = Number(r.rate);
-      if (!Number.isFinite(val)) continue;
-      // Messari stores percentage APY ("3.63" = 3.63%); Ray payloads (1e27
-      // scale) from legacy deployments are normalized here too.
-      if (val > 1e6) val = val / 1e27;
-      else val = val / 100;
+      const parsed = Number(r.rate);
+      if (!Number.isFinite(parsed)) continue;
+      const val = this.normalizeRate(parsed);
       if (r.side === 'LENDER') supplyRate = val;
       if (r.side === 'BORROWER') borrowRate = val;
     }
@@ -197,8 +247,47 @@ export class GraphFeedService {
       symbol,
       supplyApy: Number(supplyRate.toFixed(4)),
       borrowApy: Number(borrowRate.toFixed(4)),
-      totalValueLockedUSD: this.toFiniteNonNegativeNumber(market.totalValueLockedUSD),
+      totalValueLockedUSD: tvl,
+      marketName: market.name ?? undefined,
+      ...(market.inputToken?.id ? { inputTokenId: market.inputToken.id } : {}),
+      ...(typeof market.isActive === 'boolean' ? { isActive: market.isActive } : {}),
     });
+  }
+
+  /**
+   * Normalize rate values into decimal APY fractions:
+   *   - Ray/wei-style payloads (1e27 scale, e.g. 3.63e25) → /1e27
+   *   - Messari percentage APY ("3.63" = 3.63%) → /100
+   *   - Already-decimal values pass through unchanged.
+   * The band boundaries matter: Morpho Blue returns true decimal APYs like
+   * 0.0018 (0.18%) that must not be re-divided, while Aave/Compound return
+   * percentages like 3.63 that must be. Any value in (100, 1e18] passes
+   * through unchanged (outside both known scales).
+   */
+  private normalizeRate(value: number): number {
+    if (value > 1e18) return value / 1e27; // Ray-scale payload
+    if (value > 0.0001 && value <= 100) return value / 100; // Percentage APY
+    return value; // Already decimal
+  }
+
+  /**
+   * Collapse duplicate (protocol, chain, symbol) rows, keeping the
+   * deepest-liquidity market. Native and bridged stablecoin variants (USDCn,
+   * USDC.e, USDbC) normalize to the same canonical symbol; on ties the first
+   * occurrence wins.
+   */
+  private deduplicateByDeepestTvl(
+    rates: ProtocolMarketRate[],
+  ): ProtocolMarketRate[] {
+    const deepest = new Map<string, ProtocolMarketRate>();
+    for (const rate of rates) {
+      const key = `${rate.protocol}|${rate.chain}|${rate.symbol}`;
+      const incumbent = deepest.get(key);
+      if (!incumbent || rate.totalValueLockedUSD > incumbent.totalValueLockedUSD) {
+        deepest.set(key, rate);
+      }
+    }
+    return [...deepest.values()];
   }
 
   private aggregateBenchmarks(
@@ -286,7 +375,7 @@ export class GraphFeedService {
         ASSET_SYMBOLS.map((symbol) => [symbol, { ...FALLBACK_BENCHMARKS[symbol] }]),
       ),
       detailedRates: [],
-      source: 'The Graph Gateway (Deterministic Baseline Fallback)',
+      source: 'Deterministic Baseline Fallback',
     };
   }
 

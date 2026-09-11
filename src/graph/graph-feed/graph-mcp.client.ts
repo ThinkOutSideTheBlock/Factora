@@ -146,21 +146,89 @@ export class GraphMcpClient {
     return this.parseToolPayload(result);
   }
 
+  /**
+   * Keyword search with multi-token retry.
+   *
+   * The MCP keyword index is inconsistent about token separation: names like
+   * "morpho-blue-base" only match when the keyword is hyphenated ("morpho"
+   * works, "morpho blue" returns 0), while names like "Compound V3 Base"
+   * only match when it is spaced. A single failed probe therefore retries
+   * automatically with de-spaced/hyphenated/token variants before giving up,
+   * and a clean "no results" answer never throws.
+   */
   async searchSubgraphs(
     keyword: string,
   ): Promise<Record<string, unknown> | null> {
     const client = await this.ensureConnected();
-    const result = (await client.callTool({
-      name: 'search_subgraphs_by_keyword',
-      arguments: { keyword },
-    })) as McpToolCallResult;
+    const variants = GraphMcpClient.buildKeywordVariants(keyword);
 
-    if (result.isError) {
-      const text = result.content?.find((c) => c.type === 'text')?.text ?? '';
-      throw new Error(`MCP tool error: ${text}`);
+    let lastFailure: unknown = null;
+    let lastEmpty: Record<string, unknown> | null = null;
+
+    for (const variant of variants) {
+      let result: McpToolCallResult;
+      try {
+        result = (await client.callTool({
+          name: 'search_subgraphs_by_keyword',
+          arguments: { keyword: variant },
+        })) as McpToolCallResult;
+      } catch (error) {
+        lastFailure = error;
+        continue;
+      }
+
+      if (result.isError) {
+        const text = result.content?.find((c) => c.type === 'text')?.text ?? '';
+        lastFailure = new Error(`MCP tool error: ${text}`);
+        continue;
+      }
+
+      const payload = this.parseToolPayload(result);
+      if (payload && GraphMcpClient.countSearchResults(payload) > 0) {
+        return payload;
+      }
+      lastEmpty = payload;
     }
 
-    return this.parseToolPayload(result);
+    // Every variant probed cleanly but none matched — surface the last
+    // (empty) payload instead of throwing.
+    if (lastEmpty !== null || lastFailure === null) {
+      return lastEmpty;
+    }
+    throw lastFailure instanceof Error
+      ? lastFailure
+      : new Error('MCP subgraph search failed');
+  }
+
+  /**
+   * Expand a raw search keyword into probe variants: the keyword as provided,
+   * then hyphenated/spaced re-joins, then the individual tokens. Order keeps
+   * the caller's original intent first.
+   */
+  static buildKeywordVariants(keyword: string): string[] {
+    const trimmed = keyword.trim();
+    if (!trimmed) return [trimmed];
+    const tokens = trimmed.split(/[\s\-_]+/).filter((token) => token.length > 0);
+    if (tokens.length <= 1) return [trimmed];
+    const variants = [
+      trimmed,
+      tokens.join('-'),
+      tokens.join(' '),
+      tokens[0],
+      tokens[tokens.length - 1],
+    ];
+    return [...new Set(variants)];
+  }
+
+  /** Count result rows across the payload shapes the MCP service emits. */
+  private static countSearchResults(
+    payload: Record<string, unknown>,
+  ): number {
+    if (typeof payload.resultsCount === 'number') return payload.resultsCount;
+    if (typeof payload.total === 'number') return payload.total;
+    if (Array.isArray(payload.results)) return payload.results.length;
+    if (Array.isArray(payload.subgraphs)) return payload.subgraphs.length;
+    return 0;
   }
 
   async close(): Promise<void> {

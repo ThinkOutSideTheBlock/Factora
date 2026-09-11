@@ -307,3 +307,62 @@ describe('GraphMcpClient — searchSubgraphs', () => {
     await expect(client.searchSubgraphs('')).rejects.toThrow('MCP tool error');
   });
 });
+
+// ===========================================================================
+// TEST SUITE: searchSubgraphs — multi-keyword retry (Q9)
+// ===========================================================================
+describe('GraphMcpClient — searchSubgraphs multi-keyword retry', () => {
+  let client: GraphMcpClient;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    client = new GraphMcpClient('test-key');
+    mockConnect.mockResolvedValue(undefined);
+  });
+
+  afterEach(async () => {
+    await client.close();
+  });
+
+  it('should probe keyword variants when the raw keyword returns no results', async () => {
+    // "morpho blue" returns 0 (deployments are named "morpho-blue-*");
+    // the hyphenated variant must recover.
+    mockCallTool
+      .mockResolvedValueOnce({
+        content: [{ type: 'text', text: JSON.stringify({ resultsCount: 0, results: [] }) }],
+      })
+      .mockResolvedValueOnce({
+        content: [{ type: 'text', text: JSON.stringify({ resultsCount: 5, results: [{ id: 'morpho-blue-eth' }] }) }],
+      });
+
+    const result = await client.searchSubgraphs('morpho blue');
+
+    expect(mockCallTool).toHaveBeenCalledTimes(2);
+    expect(mockCallTool.mock.calls[1][0].arguments.keyword).toBe('morpho-blue');
+    expect(result).toEqual({ resultsCount: 5, results: [{ id: 'morpho-blue-eth' }] });
+  });
+
+  it('should not retry when the first variant already returns results', async () => {
+    mockCallTool.mockResolvedValueOnce({
+      content: [{ type: 'text', text: JSON.stringify({ resultsCount: 3, results: [] }) }],
+    });
+
+    const result = await client.searchSubgraphs('uniswap v3');
+
+    expect(mockCallTool).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ resultsCount: 3, results: [] });
+  });
+
+  it('should return an empty payload without throwing when all variants miss', async () => {
+    // "morpho blue" expands to 4 distinct variants; all return 0 results.
+    mockCallTool.mockResolvedValue({
+      content: [{ type: 'text', text: JSON.stringify({ resultsCount: 0, results: [] }) }],
+    });
+
+    const result = await client.searchSubgraphs('morpho blue');
+
+    expect(mockCallTool).toHaveBeenCalledTimes(4);
+    expect(result).toEqual({ resultsCount: 0, results: [] });
+  });
+});
+

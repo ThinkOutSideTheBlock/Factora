@@ -196,11 +196,11 @@ describe('GraphFeedService — Rate Normalization', () => {
   });
 
   it('should normalize Ray-scale rates (e.g. 3.63e25 → 0.0363)', async () => {
-    // LENDING_SUBGRAPHS (5 active entries):
+    // LENDING_SUBGRAPHS (7 active entries):
     //   [0] Aave v3 Ethereum, [1] Aave v3 Arbitrum,
     //   [2] Compound v3 Ethereum, [3] Compound v3 Arbitrum,
-    //   [4] Morpho Aave Ethereum
-    // Morpho Aave is at index 4. Mock indices 0-3 with empty, index 4 with Ray-scale data.
+    //   [4] Morpho Blue Ethereum, [5] Morpho Blue Arbitrum, [6] Morpho Blue Base
+    // Morpho Blue is at index 4. Mock indices 0-3 with empty, index 4 with Ray-scale data.
     for (let i = 0; i < 4; i++) {
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -211,12 +211,18 @@ describe('GraphFeedService — Rate Normalization', () => {
       ok: true,
       json: async () =>
         buildMockMessariResponse([
-          { name: 'Morpho Aave USDC', symbol: 'USDC', tvl: '20000000', supplyRate: String(3.63e25), borrowRate: String(5.12e25) },
+          { name: 'Morpho Blue USDC', symbol: 'USDC', tvl: '20000000', supplyRate: String(3.63e25), borrowRate: String(5.12e25) },
         ]),
     });
+    for (let i = 5; i < LENDING_SUBGRAPHS.length; i++) {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: { markets: [] }, errors: [] }),
+      });
+    }
 
     const report = await service.getStandardizedLendingBenchmarks();
-    const rate = report.detailedRates.find((r) => r.protocol === 'Morpho Aave');
+    const rate = report.detailedRates.find((r) => r.protocol === 'Morpho Blue');
 
     expect(rate).toBeDefined();
     expect(rate!.supplyApy).toBeCloseTo(0.0363, 4);
@@ -324,10 +330,10 @@ describe('GraphFeedService — Benchmark Aggregation', () => {
   });
 
   it('should calculate correct average, min, and max for a single asset across multiple markets', async () => {
-    // LENDING_SUBGRAPHS (5 active entries):
+    // LENDING_SUBGRAPHS (7 active entries):
     //   [0] Aave v3 Ethereum, [1] Aave v3 Arbitrum,
     //   [2] Compound v3 Ethereum, [3] Compound v3 Arbitrum,
-    //   [4] Morpho Aave Ethereum
+    //   [4] Morpho Blue Ethereum, [5] Morpho Blue Arbitrum, [6] Morpho Blue Base
     // Index 0: Aave v3 Ethereum — 4%
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -354,14 +360,21 @@ describe('GraphFeedService — Benchmark Aggregation', () => {
       ok: true,
       json: async () => ({ data: { markets: [] }, errors: [] }),
     });
-    // Index 4: Morpho Aave Ethereum — 8%
+    // Index 4: Morpho Blue Ethereum — 8%
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () =>
         buildMockMessariResponse([
-          { name: 'Morpho Aave USDC', symbol: 'USDC', tvl: '50000000', supplyRate: '8.00', borrowRate: '10.00' },
+          { name: 'Morpho Blue USDC', symbol: 'USDC', tvl: '50000000', supplyRate: '8.00', borrowRate: '10.00' },
         ]),
     });
+    // Indices 5-6: Morpho Blue Arbitrum/Base — empty
+    for (let i = 5; i < LENDING_SUBGRAPHS.length; i++) {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: { markets: [] }, errors: [] }),
+      });
+    }
 
     const report = await service.getStandardizedLendingBenchmarks();
     const usdc = report.benchmarks.USDC;
@@ -369,15 +382,15 @@ describe('GraphFeedService — Benchmark Aggregation', () => {
     expect(usdc.averageSupplyApy).toBeCloseTo(0.06, 4);
     expect(usdc.maxSupplyApy).toBeCloseTo(0.08, 4);
     expect(usdc.minSupplyApy).toBeCloseTo(0.04, 4);
-    expect(usdc.topMarket).toBe('Morpho Aave (Ethereum)');
+    expect(usdc.topMarket).toBe('Morpho Blue (Ethereum)');
     expect(usdc.marketsCount).toBe(3);
   });
 
   it('should correctly identify the top market by highest supply APY', async () => {
-    // LENDING_SUBGRAPHS (5 active entries):
+    // LENDING_SUBGRAPHS (7 active entries):
     //   [0] Aave v3 Ethereum, [1] Aave v3 Arbitrum,
     //   [2] Compound v3 Ethereum, [3] Compound v3 Arbitrum,
-    //   [4] Morpho Aave Ethereum
+    //   [4] Morpho Blue Ethereum, [5] Morpho Blue Arbitrum, [6] Morpho Blue Base
     // Index 0: Aave v3 Ethereum — 3%
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -404,11 +417,13 @@ describe('GraphFeedService — Benchmark Aggregation', () => {
           { name: 'Compound v3 USDC', symbol: 'USDC', tvl: '80000000', supplyRate: '9.00', borrowRate: '11.00' },
         ]),
     });
-    // Index 4: Morpho Aave Ethereum — empty
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ data: { markets: [] }, errors: [] }),
-    });
+    // Indices 4-6: Morpho Blue — empty
+    for (let i = 4; i < LENDING_SUBGRAPHS.length; i++) {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: { markets: [] }, errors: [] }),
+      });
+    }
 
     const report = await service.getStandardizedLendingBenchmarks();
     expect(report.benchmarks.USDC.topMarket).toBe('Compound v3 (Arbitrum)');
@@ -851,4 +866,174 @@ describe('Subgraph Config — Structure Validation', () => {
     expect(MESSARI_MULTI_ASSET_QUERY).toContain('inputToken_');
     expect(MESSARI_MULTI_ASSET_QUERY).toContain('totalValueLockedUSD');
   });
+
+  it('should no longer include the legacy Morpho Aave optimizer', () => {
+    expect(LENDING_SUBGRAPHS.some((t) => t.protocol === 'Morpho Aave')).toBe(false);
+  });
+
+  it('should cover Morpho Blue on Ethereum, Arbitrum, and Base', () => {
+    for (const chain of ['Ethereum', 'Arbitrum', 'Base']) {
+      expect(
+        LENDING_SUBGRAPHS.some((t) => t.protocol === 'Morpho Blue' && t.chain === chain),
+      ).toBe(true);
+    }
+  });
+
+  it('should not register duplicate (protocol, chain) targets', () => {
+    const keys = LENDING_SUBGRAPHS.map((t) => `${t.protocol}|${t.chain}`);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('should harden the shared query with the TVL floor and active filter', () => {
+    expect(MESSARI_MULTI_ASSET_QUERY).toContain('isActive: true');
+    expect(MESSARI_MULTI_ASSET_QUERY).toContain('totalValueLockedUSD_gte');
+    expect(MESSARI_MULTI_ASSET_QUERY).toContain('first: 50');
+    expect(MESSARI_MULTI_ASSET_QUERY).toContain('inputToken { id symbol }');
+  });
 });
+
+// ===========================================================================
+// TEST SUITE: Quality filters — dedup, TVL floor, active markets (Q1/Q2)
+// ===========================================================================
+describe('GraphFeedService — Quality Filters (Q1/Q2)', () => {
+  let service: GraphFeedService;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFetch.mockReset();
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ data: { markets: [] }, errors: [] }) });
+    process.env.GRAPH_API_KEY = 'test-api-key';
+    service = new GraphFeedService();
+  });
+
+  function queueEmptyTargets() {
+    for (let i = 1; i < LENDING_SUBGRAPHS.length; i++) {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: { markets: [] }, errors: [] }),
+      });
+    }
+  }
+
+  it('should collapse duplicate (protocol, chain, symbol) rows to the deepest-TVL market', async () => {
+    // Simulates the Aave Arbitrum native/bridged USDC split: two active
+    // markets normalizing to the same canonical symbol. The deepest-liquidity
+    // (native USDCn) market must win.
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () =>
+        buildMockMessariResponse([
+          { name: 'Aave Ethereum USDCn', symbol: 'USDC', tvl: '50000000', supplyRate: '3.00', borrowRate: '5.00' },
+          { name: 'Aave Ethereum USDC', symbol: 'USDC.e', tvl: '5000000', supplyRate: '4.50', borrowRate: '6.00' },
+        ]),
+    });
+    queueEmptyTargets();
+
+    const report = await service.getStandardizedLendingBenchmarks();
+    const usdcRows = report.detailedRates.filter(
+      (r) => r.protocol === 'Aave v3' && r.chain === 'Ethereum' && r.symbol === 'USDC',
+    );
+    expect(usdcRows).toHaveLength(1);
+    expect(usdcRows[0].supplyApy).toBeCloseTo(0.03, 4);
+    expect(usdcRows[0].marketName).toBe('Aave Ethereum USDCn');
+    expect(report.benchmarks.USDC.marketsCount).toBe(1);
+  });
+
+  it('should exclude markets below the $1M TVL floor', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () =>
+        buildMockMessariResponse([
+          { name: 'Morpho Blue Dust USDC', symbol: 'USDC', tvl: '500000', supplyRate: '50.00', borrowRate: '60.00' },
+          { name: 'Morpho Blue USDT', symbol: 'USDT', tvl: '20000000', supplyRate: '1.80', borrowRate: '3.00' },
+        ]),
+    });
+    queueEmptyTargets();
+
+    const report = await service.getStandardizedLendingBenchmarks();
+    expect(report.detailedRates).toHaveLength(1);
+    expect(report.detailedRates[0].symbol).toBe('USDT');
+    // USDC has no surviving live market → its own asset fallback.
+    expect(report.benchmarks.USDC.averageSupplyApy).toBe(0.048);
+  });
+
+  it('should exclude inactive (paused/frozen) markets client-side', async () => {
+    // The frozen bridged USDC.e market on Aave Arbitrum (isActive=false) must
+    // never enter benchmarks even when its TVL passes the floor.
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: {
+          markets: [
+            {
+              name: 'Aave Arbitrum USDC (bridged, frozen)',
+              isActive: false,
+              inputToken: { id: '0xff970a61a04b1ca14834a43f5de4533ebddb5cc8', symbol: 'USDC' },
+              totalValueLockedUSD: '50000000',
+              rates: [{ rate: '3.90', side: 'LENDER', type: 'VARIABLE' }],
+            },
+          ],
+        },
+        errors: [],
+      }),
+    });
+    queueEmptyTargets();
+
+    const report = await service.getStandardizedLendingBenchmarks();
+    expect(report.detailedRates).toHaveLength(0);
+    expect(report.source).toContain('Fallback');
+  });
+
+  it('should expose marketName, inputTokenId, and isActive metadata', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: {
+          markets: [
+            {
+              name: 'Aave Arbitrum USDCn',
+              isActive: true,
+              inputToken: { id: '0xaf88d065e77c8cc2239327c5edb3a432268e5831', symbol: 'USDC' },
+              totalValueLockedUSD: '172251517',
+              rates: [
+                { rate: '2.76', side: 'LENDER', type: 'VARIABLE' },
+                { rate: '5.12', side: 'BORROWER', type: 'VARIABLE' },
+              ],
+            },
+          ],
+        },
+        errors: [],
+      }),
+    });
+    queueEmptyTargets();
+
+    const report = await service.getStandardizedLendingBenchmarks();
+    expect(report.detailedRates).toHaveLength(1);
+    const rate = report.detailedRates[0];
+    expect(rate.marketName).toBe('Aave Arbitrum USDCn');
+    expect(rate.inputTokenId).toBe('0xaf88d065e77c8cc2239327c5edb3a432268e5831');
+    expect(rate.isActive).toBe(true);
+    expect(rate.borrowApy).toBeCloseTo(0.0512, 4);
+  });
+
+  it('should pass through already-decimal rates outside the percentage band', async () => {
+    // 150 sits in (100, 1e18] — outside both known scales — and must pass
+    // through unchanged instead of being corrupted by a heuristic.
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () =>
+        buildMockMessariResponse([
+          { name: 'Aave v3 USDC', symbol: 'USDC', tvl: '50000000', supplyRate: '150', borrowRate: '200' },
+        ]),
+    });
+    queueEmptyTargets();
+
+    const report = await service.getStandardizedLendingBenchmarks();
+    const rate = report.detailedRates.find((r) => r.protocol === 'Aave v3');
+    expect(rate).toBeDefined();
+    expect(rate!.supplyApy).toBe(150);
+  });
+});
+
+
+

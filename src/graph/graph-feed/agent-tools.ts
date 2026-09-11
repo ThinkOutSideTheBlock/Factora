@@ -49,7 +49,8 @@ export async function searchSubgraphs(
           : typeof raw?.total === 'number'
             ? raw.total
             : rawResults.length,
-      results: rawResults.map((result) => ({
+      results: dedupeBySubgraphId(
+        rawResults.map((result) => ({
         subgraphId:
           typeof result?.subgraphId === 'string'
             ? result.subgraphId
@@ -69,7 +70,8 @@ export async function searchSubgraphs(
                 'string'
               ? result.currentVersion.subgraphDeployment.ipfsHash
             : null,
-      })),
+        })),
+      ),
       isError: false,
     };
   } catch (error) {
@@ -87,3 +89,21 @@ export const agentTools = {
   querySubgraph,
   searchSubgraphs,
 };
+
+/**
+ * Collapse duplicate search hits for the same subgraph (the keyword index can
+ * surface the same deployment under multiple protocol aliases). Entries with
+ * an empty subgraphId are kept so callers can still see partial metadata.
+ */
+function dedupeBySubgraphId<T extends { subgraphId: string }>(results: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const result of results) {
+    if (result.subgraphId) {
+      if (seen.has(result.subgraphId)) continue;
+      seen.add(result.subgraphId);
+    }
+    out.push(result);
+  }
+  return out;
+}

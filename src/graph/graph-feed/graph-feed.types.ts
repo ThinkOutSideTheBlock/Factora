@@ -3,9 +3,17 @@ export interface ProtocolMarketRate {
   chain: string;
   symbol: string;
   supplyApy: number;
-  borrowApy: number;
+  /** Optional for backward compatibility; may be 0 when borrow data is unavailable. */
+  borrowApy?: number;
   totalValueLockedUSD: number;
+  /** Additive metadata for labeling native vs bridged markets (e.g. "Aave Arbitrum USDCn"). */
+  marketName?: string;
+  /** Underlying token contract address (lowercase hex) when the subgraph exposes it. */
+  inputTokenId?: string;
+  /** True when the subgraph reports the market as active. */
+  isActive?: boolean;
 }
+
 
 export interface AssetBenchmark {
   symbol: string;
