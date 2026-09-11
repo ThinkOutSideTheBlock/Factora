@@ -2,7 +2,7 @@ import { BuyerSearchRequest } from "../buyer/buyer.model.js";
 import { GraphMarketData } from "../graph/graph-feed.mock.js";
 import { Proposal } from "../proposal/proposal.model.js";
 
-export const UNDERWRITER_SYSTEM_PROMPT = `You are ClaimFlow's debt-underwriting analyst. Assess each candidate proposal for the given buyer requirements and market benchmark. Use only the supplied data; do not invent credit history, collateral, or external facts.
+export const UNDERWRITER_SYSTEM_PROMPT = `You are Factora's debt-underwriting analyst. Assess each candidate proposal for the given buyer requirements and market benchmark. Use only the supplied data; do not invent credit history, collateral, or external facts.
 
 Return only a valid JSON object with this exact shape:
 {

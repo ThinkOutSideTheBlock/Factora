@@ -3,6 +3,9 @@ import { v4 as uuidv4 } from 'uuid';
 import { CreateProposalDto, CreateProposalSchema, Proposal } from './proposal.model.js';
 import { addProposal, getAllProposals } from './proposal.storage.js';
 import { validateBody } from '../common/validate.middleware.js';
+import { createLogger } from '../common/logger.js';
+
+const log = createLogger('proposal');
 
 export const proposalRouter = Router();
 
@@ -43,12 +46,13 @@ proposalRouter.post(
       };
 
       const savedProposal = await addProposal(newProposal);
+      log.info(`Proposal created: id=${savedProposal.id} apy=${apy}% amount=${amount} required=${requiredAmount} proposer=${proposerAddress}`);
       res.status(201).json({
         message: 'Proposal created successfully',
         proposal: savedProposal
       });
     } catch (error) {
-      console.error('Error creating proposal:', error);
+      log.error('Error creating proposal', error);
       res.status(500).json({ error: 'Internal server error while creating proposal' });
     }
   }
@@ -71,7 +75,7 @@ proposalRouter.get('/', async (req: Request, res: Response): Promise<void> => {
 
     res.status(200).json({ count: proposals.length, proposals });
   } catch (error) {
-    console.error('Error fetching proposals:', error);
+    log.error('Error fetching proposals', error);
     res.status(500).json({ error: 'Internal server error while retrieving proposals' });
   }
 });

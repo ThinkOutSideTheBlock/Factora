@@ -14,6 +14,9 @@ import {
     computeBudgetedAmount,
     getSmartReportPricingConfig,
 } from "../x402/pricing.js";
+import { createLogger } from "../common/logger.js";
+
+const log = createLogger("buyer");
 
 /**
  * Stage 1: in-memory hard filter for buyer constraints.
@@ -41,6 +44,9 @@ export async function searchProposals(
 ): Promise<BuyerMatchResponse> {
     const allProposals = await getAllProposals();
     const filteredCandidates = filterProposals(allProposals, criteria);
+    log.info(
+        `Stage 1 hard filter: ${allProposals.length} proposals → ${filteredCandidates.length} candidates (amount ${criteria.amountMin}-${criteria.amountMax}, ${criteria.durationInDaysMin}-${criteria.durationInDaysMax}d, APY ≥ ${criteria.apyInPercentMin}%)`,
+    );
 
     return {
         count: filteredCandidates.length,
@@ -55,6 +61,8 @@ export async function generateSmartReport(
     const pricing = getSmartReportPricingConfig();
     const budgetedTokens = criteria.maxTokens ?? pricing.maxTokens;
     const budgetedAmountTinybars = computeBudgetedAmount(budgetedTokens, pricing);
+    log.info(`Smart report: budget ${budgetedTokens} tokens → price ${budgetedAmountTinybars} tinybars (${(Number(budgetedAmountTinybars) / 100_000_000).toFixed(4)} HBAR)`);
+    const reportStartedAt = Date.now();
 
     const pricingInfo = {
         strategy: 'declared-budget-per-token' as const,
@@ -68,6 +76,7 @@ export async function generateSmartReport(
     const marketBenchmark = await getMarketBenchmark();
 
     if (filteredCandidates.length === 0) {
+        log.info('Smart report: no candidates passed the hard filter — returning empty report (no LLM call)');
         return {
             count: 0,
             overallSummary:
@@ -106,6 +115,9 @@ export async function generateSmartReport(
 
     // Sort by fitScore descending
     results.sort((a, b) => b.evaluation.fitScore - a.evaluation.fitScore);
+    log.info(
+        `Smart report done: ${results.length} results in ${Date.now() - reportStartedAt}ms · usage ${usage ? `${usage.totalTokens} tokens` : 'n/a (fallback)'}`,
+    );
 
     return {
         count: results.length,

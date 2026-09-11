@@ -1288,3 +1288,57 @@ input:focus,
   opacity: 0.85;
   word-break: break-all;
 }
+
+/* ---------- Agent payment pipeline (live step progress) ---------- */
+.pipeline {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin: 10px 0;
+}
+.pipeline-title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+.pipeline-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+.pipeline-step .p-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(148, 163, 184, 0.35);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  flex-shrink: 0;
+}
+.pipeline-step .p-detail {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  text-align: right;
+  max-width: 55%;
+}
+.pipeline-step.running { color: var(--text-primary, #e2e8f0); }
+.pipeline-step.running .p-icon {
+  border-color: var(--accent-cyan);
+  border-top-color: transparent;
+  animation: pipeline-spin 0.8s linear infinite;
+}
+.pipeline-step.done { color: var(--text-primary, #e2e8f0); }
+.pipeline-step.done .p-icon { border-color: #34d399; color: #34d399; }
+.pipeline-step.error { color: #f87171; }
+.pipeline-step.error .p-icon { border-color: #f87171; color: #f87171; }
+.pipeline-step.error .p-detail { color: #f87171; }
+@keyframes pipeline-spin { to { transform: rotate(360deg); } }

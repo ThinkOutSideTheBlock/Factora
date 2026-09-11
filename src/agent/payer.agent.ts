@@ -1,16 +1,20 @@
 /**
  * Payer agent — the UI's wallet proxy.
  *
- * Browsers can never pay for x402 resources directly (that requires a private
- * key). The UI delegates to this module, which performs the full flow against
- * our own protected endpoints: unpaid request → 402 invoice → sign Hedera
- * TransferTransaction → paid retry → settlement receipt.
+ * The browser can never hold a private key, so payments are delegated here.
+ * The x402 flow is executed explicitly (rather than through the opaque
+ * wrapFetchWithPayment helper) so every step can be logged and streamed to
+ * the UI: ① invoice → ② sign → ③ settle + resource.
  */
-import { wrapFetchWithPayment, x402HTTPClient } from "@x402/fetch";
-import { x402Client } from "@x402/core/client";
+import { x402Client, x402HTTPClient } from "@x402/fetch";
 import { ExactHederaScheme } from "@x402/hedera/exact/client";
 import { createClientHederaSigner, PrivateKey } from "@x402/hedera";
 import { getX402Network } from "../x402/x402.middleware.js";
+import { createLogger } from "../common/logger.js";
+
+const log = createLogger("agent");
+
+const TINYBARS_PER_HBAR = 100_000_000;
 
 /** Thrown when the UI asks the agent to pay but no agent wallet is configured. */
 export class AgentWalletNotConfiguredError extends Error {
@@ -45,6 +49,17 @@ export function getAgentWallet(): AgentWallet | null {
     return { accountId, privateKey };
 }
 
+export type AgentStepName = "invoice" | "sign" | "settle";
+
+export interface AgentStepEvent {
+    step: AgentStepName;
+    status: "running" | "done" | "error";
+    detail?: string;
+    data?: Record<string, unknown>;
+}
+
+export type OnAgentStep = (event: AgentStepEvent) => void;
+
 export interface AgentPaidRequestResult {
     /** HTTP status of the final (post-payment) response. */
     httpStatus: number;
@@ -52,13 +67,12 @@ export interface AgentPaidRequestResult {
     data: unknown;
     /** Facilitator settlement receipt (Hedera tx id, network, payer), or null. */
     settlement: Record<string, unknown> | null;
+    /** Total wall-clock time of the whole flow, in milliseconds. */
+    durationMs: number;
 }
 
 interface AgentClient {
-    fetchWithPayment: (
-        input: RequestInfo | URL,
-        init?: RequestInit,
-    ) => Promise<Response>;
+    client: x402Client;
     httpClient: x402HTTPClient;
 }
 
@@ -95,49 +109,172 @@ function getAgentClient(): AgentClient {
             ],
         });
 
-    const agentClient: AgentClient = {
-        fetchWithPayment: wrapFetchWithPayment(fetch, client),
-        httpClient: new x402HTTPClient(client),
-    };
+    const agentClient: AgentClient = { client, httpClient: new x402HTTPClient(client) };
     agentClientCache.set(cacheKey, agentClient);
     return agentClient;
 }
 
+function describeError(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
+function hbar(tinybars: unknown): string {
+    const n = Number(tinybars ?? 0);
+    return Number.isFinite(n) ? String(parseFloat((n / TINYBARS_PER_HBAR).toFixed(6))) : String(tinybars);
+}
+
+/**
+ * Pays for a protected resource on behalf of the UI, reporting each step.
+ * ① unpaid request → 402 invoice; ② sign the Hedera payment; ③ paid retry
+ * where the facilitator settles on-chain and the route produces the resource.
+ */
 export async function paidRequest(
     path: string,
     payload: unknown,
+    onStep?: OnAgentStep,
 ): Promise<AgentPaidRequestResult> {
-    const { fetchWithPayment, httpClient } = getAgentClient();
+    const { httpClient } = getAgentClient();
+    const wallet = getAgentWallet();
     const baseUrl = `http://127.0.0.1:${process.env.PORT ?? 3000}`;
+    const url = `${baseUrl}${path}`;
+    const body = JSON.stringify(payload ?? {});
+    const startedAt = Date.now();
+    log.info(`Paid flow started → ${path}`);
 
-    const response = await fetchWithPayment(`${baseUrl}${path}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload ?? {}),
+    // ① Invoice: the unpaid request must come back as a 402 challenge.
+    onStep?.({ step: "invoice", status: "running", detail: `POST ${path}` });
+    let invoiceRes: Response;
+    try {
+        invoiceRes = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body,
+        });
+    } catch (error) {
+        log.error(`Resource server unreachable at ${url}`, error);
+        onStep?.({ step: "invoice", status: "error", detail: describeError(error) });
+        throw new Error(`Resource server unreachable at ${path}: ${describeError(error)}`);
+    }
+    if (invoiceRes.status !== 402) {
+        const text = await invoiceRes.text().catch(() => "");
+        log.error(`Expected 402 from ${path}, got HTTP ${invoiceRes.status}`, {
+            body: text.slice(0, 300),
+        });
+        onStep?.({ step: "invoice", status: "error", detail: `HTTP ${invoiceRes.status}` });
+        throw new Error(
+            `Expected a payment challenge from ${path} but got HTTP ${invoiceRes.status}. ${text.slice(0, 200)}`,
+        );
+    }
+    let paymentRequired;
+    try {
+        paymentRequired = httpClient.getPaymentRequiredResponse((name) =>
+            invoiceRes.headers.get(name),
+        );
+    } catch (error) {
+        onStep?.({ step: "invoice", status: "error", detail: "undecodable invoice" });
+        throw new Error(`Could not decode the x402 invoice from ${path}: ${describeError(error)}`);
+    }
+    const accept = paymentRequired.accepts?.[0];
+    const amountHbar = accept ? hbar(accept.amount) : "?";
+    log.info(
+        `402 invoice received for ${path}: ${amountHbar} HBAR → ${accept?.payTo ?? "?"} (${accept?.network ?? "?"})`,
+    );
+    onStep?.({
+        step: "invoice",
+        status: "done",
+        detail: `${amountHbar} HBAR`,
+        data: {
+            amountTinybars: accept?.amount,
+            payTo: accept?.payTo,
+            network: accept?.network,
+        },
     });
+
+    // ② Sign: build the partially-signed Hedera TransferTransaction.
+    onStep?.({
+        step: "sign",
+        status: "running",
+        detail: wallet ? `wallet ${wallet.accountId}` : undefined,
+    });
+    let paymentPayload;
+    try {
+        paymentPayload = await httpClient.createPaymentPayload(paymentRequired);
+    } catch (error) {
+        let message = describeError(error);
+        if (message.includes("maxAmountPerPayment")) {
+            message += " — raise AGENT_MAX_PAYMENT_TINYBAR in .env";
+        }
+        log.error(`Payment signing failed for ${path}: ${message}`);
+        onStep?.({ step: "sign", status: "error", detail: message });
+        throw new Error(`Signing the payment failed: ${message}`);
+    }
+    log.info(`Payment payload signed by ${wallet?.accountId ?? "agent wallet"}`);
+    onStep?.({ step: "sign", status: "done", detail: wallet?.accountId ?? "signed" });
+
+    // ③ Settle: paid retry — the facilitator verifies, co-signs as fee payer and
+    // settles on-chain, then our route handler produces the actual resource.
+    onStep?.({ step: "settle", status: "running", detail: "settling via Blocky402…" });
+    const signatureHeaders = httpClient.encodePaymentSignatureHeader(paymentPayload);
+    let res: Response;
+    try {
+        res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...signatureHeaders },
+            body,
+        });
+    } catch (error) {
+        log.error(`Paid retry failed for ${path}`, error);
+        onStep?.({ step: "settle", status: "error", detail: describeError(error) });
+        throw new Error(`Paid request to ${path} failed: ${describeError(error)}`);
+    }
 
     let data: unknown = null;
     try {
-        data = await response.json();
+        data = await res.json();
     } catch {
         // Non-JSON body — keep null; httpStatus still tells the story.
     }
 
-    // The settlement header only exists on successful responses.
-    const settlementHeader = response.headers.get("payment-response");
-    const settlement = settlementHeader
-        ? (JSON.parse(
-              JSON.stringify(
-                  httpClient.getPaymentSettleResponse((name) =>
-                      response.headers.get(name),
-                  ),
-              ),
-          ) as Record<string, unknown>)
-        : null;
+    if (!res.ok) {
+        let reason = (data as { error?: string } | null)?.error ?? "";
+        if (res.status === 402) {
+            try {
+                const declined = httpClient.getPaymentRequiredResponse((n) => res.headers.get(n));
+                reason = reason || declined.error || "";
+            } catch {
+                // header missing — keep body error
+            }
+        }
+        log.error(`Paid request failed (HTTP ${res.status}) for ${path}: ${reason || "no detail"}`);
+        onStep?.({
+            step: "settle",
+            status: "error",
+            detail: `HTTP ${res.status}: ${reason || "failed"}`.slice(0, 160),
+        });
+        throw new Error(
+            `Payment did not produce the resource (HTTP ${res.status}): ${reason || "unknown error"}`,
+        );
+    }
 
-    return {
-        httpStatus: response.status,
-        data,
-        settlement,
-    };
+    let settlement: Record<string, unknown> | null = null;
+    if (res.headers.get("payment-response")) {
+        try {
+            settlement = JSON.parse(
+                JSON.stringify(httpClient.getPaymentSettleResponse((n) => res.headers.get(n))),
+            ) as Record<string, unknown>;
+        } catch (error) {
+            log.warn(`Could not parse settlement receipt for ${path}`, error);
+        }
+    }
+    const tx = settlement?.transaction ?? "";
+    log.info(
+        `Paid flow finished ${path} → HTTP ${res.status} in ${Date.now() - startedAt}ms (tx ${tx || "n/a"})`,
+    );
+    onStep?.({
+        step: "settle",
+        status: "done",
+        detail: tx ? `tx ${String(tx).split("@")[0]}@…` : "settled",
+    });
+
+    return { httpStatus: res.status, data, settlement, durationMs: Date.now() - startedAt };
 }

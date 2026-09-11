@@ -9,6 +9,9 @@ import { HTTPFacilitatorClient, x402ResourceServer, type RoutesConfig } from '@x
 import { ExactHederaScheme } from '@x402/hedera/exact/server';
 import type { Network } from '@x402/core/types';
 import { PROPOSAL_FIXED_PRICE, smartReportPrice } from './pricing.js';
+import { createLogger } from '../common/logger.js';
+
+const log = createLogger('x402');
 
 const SUPPORTED_NETWORKS = ['hedera:testnet', 'hedera:mainnet'] as const;
 export type HederaX402Network = (typeof SUPPORTED_NETWORKS)[number];
@@ -78,11 +81,50 @@ export function getPayToAddress(): string {
 
 /** x402 resource server delegating verification/settlement to the facilitator. */
 export function createX402ResourceServer(): x402ResourceServer {
-  const { facilitatorUrl } = resolveX402Config();
-  const facilitatorClient = new HTTPFacilitatorClient({ url: facilitatorUrl });
+    const { facilitatorUrl } = resolveX402Config();
+    const facilitatorClient = new HTTPFacilitatorClient({ url: facilitatorUrl });
 
-  return new x402ResourceServer(facilitatorClient)
-    .register('hedera:*', new ExactHederaScheme({}));
+    return new x402ResourceServer(withFacilitatorRetries(facilitatorClient))
+        .register('hedera:*', new ExactHederaScheme({}));
+}
+
+/**
+ * The facilitator endpoint occasionally drops cold connections (observed
+ * UND_ERR_CONNECT_TIMEOUT / ECONNRESET). verify/settle happen once per paid
+ * request, so a transient blip would otherwise fail the whole flow. Retry
+ * network-level errors a couple of times with a short backoff.
+ */
+function withFacilitatorRetries(inner: HTTPFacilitatorClient, retries = 2) {
+    const withRetry = async <T>(op: string, fn: () => Promise<T>): Promise<T> => {
+        let lastError: unknown;
+        for (let attempt = 0; attempt <= retries; attempt++) {
+            try {
+                return await fn();
+            } catch (error) {
+                lastError = error;
+                const err = error as { message?: string; cause?: { code?: string } };
+                const transient =
+                    /fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|UND_ERR|timeout/i.test(
+                        err.message ?? '',
+                    ) || Boolean(err.cause?.code);
+                if (!transient || attempt === retries) break;
+                const delayMs = 400 * (attempt + 1);
+                log.warn(
+                    `Facilitator ${op} failed (${err.cause?.code ?? err.message}) — retry ${attempt + 1}/${retries} in ${delayMs}ms`,
+                );
+                await new Promise((resolve) => setTimeout(resolve, delayMs));
+            }
+        }
+        throw lastError;
+    };
+
+    return {
+        verify: (payload: Parameters<HTTPFacilitatorClient['verify']>[0], requirements: Parameters<HTTPFacilitatorClient['verify']>[1]) =>
+            withRetry('verify', () => inner.verify(payload, requirements)),
+        settle: (payload: Parameters<HTTPFacilitatorClient['settle']>[0], requirements: Parameters<HTTPFacilitatorClient['settle']>[1]) =>
+            withRetry('settle', () => inner.settle(payload, requirements)),
+        getSupported: () => withRetry('getSupported', () => inner.getSupported()),
+    };
 }
 
 /** Route price map for paymentMiddleware; price may be a static amount or a DynamicPrice. */

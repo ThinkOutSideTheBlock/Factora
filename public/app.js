@@ -130,21 +130,28 @@ async function publishProposalViaAgent(payload) {
   const errBox = document.getElementById('proposalErrorBox');
   const succBox = document.getElementById('proposalSuccessBox');
 
-  errBox.innerHTML = '<div class="payment-panel">⏳ Signing payment & settling on Hedera… this takes ~2-3 seconds.</div>';
+  errBox.innerHTML = renderPipelineHtml();
   errBox.classList.remove('hidden');
+  succBox.classList.add('hidden');
 
-  const { ok, data } = await payViaAgent('/api/proposals', payload);
+  try {
+    const final = await runAgentPaymentStream('/api/proposals', payload, (evt) =>
+      updatePipeline(errBox, evt.step, evt.status, evt.detail)
+    );
 
-  if (ok && data.data && data.data.proposal) {
-    errBox.classList.add('hidden');
-    const txLine = settlementText(data.settlement);
-    succBox.innerHTML = `✓ Proposal created! ID: ${data.data.proposal.id.substring(0, 8)}… | APY: ${data.data.proposal.apy}%${txLine ? `<br><small>${txLine}</small>` : ''}`;
-    succBox.classList.remove('hidden');
-    document.getElementById('createProposalForm').reset();
-    updateApyPreview();
-    await loadProposals();
-  } else {
-    errBox.innerHTML = `<div class="alert-box error-box">⚠️ ${escapeHtml((data && data.error) || 'Agent payment failed')}</div>`;
+    if (final.ok && final.data && final.data.proposal) {
+      errBox.classList.add('hidden');
+      const txLine = settlementText(final.settlement);
+      succBox.innerHTML = `✓ Proposal created! ID: ${final.data.proposal.id.substring(0, 8)}… | APY: ${final.data.proposal.apy}%${txLine ? `<br><small>${txLine}</small>` : ''}`;
+      succBox.classList.remove('hidden');
+      document.getElementById('createProposalForm').reset();
+      updateApyPreview();
+      await loadProposals();
+    } else {
+      errBox.innerHTML = `<div class="alert-box error-box">⚠️ ${escapeHtml(final.error || 'Agent payment failed')}</div>`;
+    }
+  } catch (err) {
+    errBox.innerHTML = `<div class="alert-box error-box">⚠️ ${escapeHtml(err.message)}</div>`;
   }
   delete pendingPayments.proposal;
 }
@@ -393,61 +400,62 @@ async function payFromAgent() {
   const outputEl = document.getElementById('x402InspectorOutput');
   const btn = document.getElementById('agentPayBtn');
   btn.disabled = true;
-  outputEl.textContent = '// ② Agent is signing the Hedera TransferTransaction → paying via Blocky402…';
+
+  outputEl.innerHTML = renderPipelineHtml();
 
   try {
-    const res = await fetch('/api/agent/paid-request', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        path: '/api/proposals',
-        payload: {
-          proposerAddress: '0x1111111111111111111111111111111111111111',
-          amount: 5000,
-          requiredAmount: 4500,
-          returnDateInDays: 30
-        }
-      })
-    });
-    const data = await res.json();
+    const final = await runAgentPaymentStream('/api/proposals', {
+      proposerAddress: '0x1111111111111111111111111111111111111111',
+      amount: 5000,
+      requiredAmount: 4500,
+      returnDateInDays: 30
+    }, (evt) => updatePipeline(outputEl, evt.step, evt.status, evt.detail));
 
-    if (!res.ok) {
-      outputEl.textContent = '// Agent payment failed:\n' + JSON.stringify(data, null, 2);
-      return;
-    }
-
-    outputEl.textContent = JSON.stringify({
-      step: '② Paid request completed',
-      finalHttpStatus: data.httpStatus,
-      settlement: data.settlement,
-      paidResource: data.data
-    }, null, 2);
+    const summary = {
+      finalHttpStatus: final.httpStatus,
+      settlement: final.settlement,
+      paidResource: final.ok ? final.data : undefined,
+      error: final.ok ? undefined : final.error
+    };
+    outputEl.innerHTML += '<pre class="code-block" style="border:none;background:transparent;margin:10px 0 0">' +
+      escapeHtml(JSON.stringify(summary, null, 2)) + '</pre>';
   } catch (err) {
-    outputEl.textContent = '// Agent payment error:\n' + err.message;
+    outputEl.innerHTML += '<pre class="code-block" style="border:none;background:transparent;margin:10px 0 0">// ' +
+      escapeHtml(err.message) + '</pre>';
   } finally {
     btn.disabled = false;
   }
 }
 
-async function checkAgentStatus() {
+// Agent wallet status. Retries briefly and re-checks on focus, so a tsx-watch
+// restart or a transient fetch failure can't leave the badge stuck on red.
+async function checkAgentStatus(attempt = 0) {
   const badge = document.getElementById('agentStatusBadge');
   const text = document.getElementById('agentStatusText');
   const payBtn = document.getElementById('agentPayBtn');
+  if (!badge || !text) return; // stale cached HTML without the badge markup
   try {
-    const res = await fetch('/api/agent/status');
+    const res = await fetch('/api/agent/status', { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     if (data.configured) {
       badge.className = 'status-indicator online';
       text.textContent = `Agent ${data.accountId} · ${data.network}`;
-      payBtn.disabled = false;
-    } else {
-      badge.className = 'status-indicator offline';
-      text.textContent = 'Not configured (set HEDERA_AGENT_* in .env)';
-      payBtn.disabled = true;
+      if (payBtn) payBtn.disabled = false;
+      return;
     }
+    badge.className = 'status-indicator offline';
+    text.textContent = 'Not configured (set HEDERA_AGENT_* in .env)';
+    if (payBtn) payBtn.disabled = true;
   } catch {
     badge.className = 'status-indicator offline';
-    text.textContent = 'Agent status unavailable';
+    if (attempt < 2) {
+      text.textContent = 'Checking agent wallet…';
+      setTimeout(() => checkAgentStatus(attempt + 1), 1200 * (attempt + 1));
+    } else {
+      text.textContent = 'Agent status unavailable';
+      if (payBtn) payBtn.disabled = true;
+    }
   }
 }
 
@@ -460,6 +468,70 @@ async function payViaAgent(path, payload) {
   });
   const data = await res.json();
   return { ok: res.ok, data };
+}
+
+// ---------- Agent payment pipeline (live step progress) ----------
+const AGENT_PIPELINE_STEPS = [
+  { id: 'invoice', label: '① Payment invoice (x402 challenge)' },
+  { id: 'sign', label: '② Sign Hedera payment (agent wallet)' },
+  { id: 'settle', label: '③ On-chain settlement + request' }
+];
+
+function renderPipelineHtml() {
+  return '<div class="pipeline"><div class="pipeline-title">Agent payment · live progress</div>' +
+    AGENT_PIPELINE_STEPS.map(s =>
+      `<div class="pipeline-step" data-step="${s.id}"><span class="p-icon"></span><span class="p-label">${s.label}</span><span class="p-detail"></span></div>`
+    ).join('') + '</div>';
+}
+
+function updatePipeline(containerEl, step, status, detail) {
+  const el = containerEl.querySelector(`.pipeline-step[data-step="${step}"]`);
+  if (!el) return;
+  el.classList.remove('running', 'done', 'error');
+  el.classList.add(status);
+  el.querySelector('.p-icon').textContent = status === 'done' ? '✓' : status === 'error' ? '✕' : '';
+  if (detail !== undefined && detail !== null) {
+    el.querySelector('.p-detail').textContent = detail;
+  }
+}
+
+// Reads the NDJSON progress stream from /api/agent/paid-request/stream.
+// Returns the final event { ok, httpStatus, data, settlement }; transport
+// failures throw (application errors arrive as final.ok = false instead).
+async function runAgentPaymentStream(path, payload, onStep) {
+  const res = await fetch('/api/agent/paid-request/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, payload })
+  });
+  if (!res.ok || !res.body) {
+    let msg = 'Agent request failed (HTTP ' + res.status + ')';
+    try {
+      const j = await res.json();
+      if (j.error) msg = j.error;
+    } catch { /* non-JSON error */ }
+    throw new Error(msg);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let final = null;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      let evt;
+      try { evt = JSON.parse(line); } catch { continue; }
+      if (evt.type === 'step') onStep(evt);
+      else if (evt.type === 'final') final = evt;
+    }
+  }
+  if (!final) throw new Error('Agent stream ended without a final result');
+  return final;
 }
 
 function getBuyerCriteria() {
@@ -833,30 +905,37 @@ async function generateReportViaAgent() {
 
   section.classList.remove('hidden');
   container.className = 'smart-report-container';
-  container.innerHTML = reportSkeletonHtml();
+  container.innerHTML = renderPipelineHtml();
 
-  const { ok, data } = await payViaAgent('/api/buyer/smart-report', latestBuyerCriteria);
+  try {
+    const final = await runAgentPaymentStream('/api/buyer/smart-report', latestBuyerCriteria, (evt) =>
+      updatePipeline(container, evt.step, evt.status, evt.detail)
+    );
 
-  if (!ok || !data.data || typeof data.data.count === 'undefined') {
-    container.className = 'info-placeholder';
-    container.innerHTML = `<div class="alert-box error-box">⚠️ ${escapeHtml((data && data.error) || 'Agent payment failed')}</div>`;
+    if (!final.ok || !final.data || typeof final.data.count === 'undefined') {
+      container.className = 'info-placeholder';
+      container.innerHTML = `<div class="alert-box error-box">⚠️ ${escapeHtml(final.error || 'Agent payment failed')}</div>`;
+      delete pendingPayments.smartReport;
+      return;
+    }
+
+    latestReportData = { ...final.data, generatedAt: new Date().toISOString() };
+    renderSmartReport(container, latestReportData);
+    animateReport(container);
+
+    const usage = latestReportData.usage;
+    const usageLine = usage && usage.totalTokens
+      ? `${usage.totalTokens} LLM tokens · charged ${hbarFromTinybars(usage.chargedTinybars)} HBAR · `
+      : '';
+    metaEl.textContent = `Underwriter agent · ${usageLine}${settlementText(final.settlement)}`;
+    metaEl.classList.remove('hidden');
+    document.getElementById('reportActions').classList.remove('hidden');
+    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
     delete pendingPayments.smartReport;
-    return;
+  } catch (err) {
+    container.className = 'info-placeholder';
+    container.innerHTML = `<div class="alert-box error-box">⚠️ ${escapeHtml(err.message)}</div>`;
   }
-
-  latestReportData = { ...data.data, generatedAt: new Date().toISOString() };
-  renderSmartReport(container, latestReportData);
-  animateReport(container);
-
-  const usage = latestReportData.usage;
-  const usageLine = usage && usage.totalTokens
-    ? `${usage.totalTokens} LLM tokens · charged ${hbarFromTinybars(usage.chargedTinybars)} HBAR · `
-    : '';
-  metaEl.textContent = `Underwriter agent · ${usageLine}${settlementText(data.settlement)}`;
-  metaEl.classList.remove('hidden');
-  document.getElementById('reportActions').classList.remove('hidden');
-  section.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  delete pendingPayments.smartReport;
 }
 
 // Paid smart-report service: calls the LLM only after the buyer requests it.
@@ -926,4 +1005,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadProposals();
   checkAgentStatus();
   setInterval(checkServerHealth, 10000);
+  // Self-heal the status badges when the tab regains focus or connectivity.
+  window.addEventListener('focus', () => { checkServerHealth(); checkAgentStatus(); });
+  window.addEventListener('online', () => { checkServerHealth(); checkAgentStatus(); });
 });

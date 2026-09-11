@@ -10,6 +10,9 @@ import {
     buildUnderwriterPrompt,
     UNDERWRITER_SYSTEM_PROMPT,
 } from "./underwriter.prompt.js";
+import { createLogger } from "../common/logger.js";
+
+const log = createLogger("underwriter");
 
 export interface UnderwriterAiResult {
     analysis: UnderwriterAnalysisResponse;
@@ -35,6 +38,12 @@ export async function evaluateProposalsWithAI(
         };
     }
 
+    log.info(`AI underwriting ${candidates.length} candidates`);
+
+    // No silent degradation: if the LLM is unavailable or returns garbage, the
+    // error propagates so the caller (and the buyer) sees the real cause.
+    // In the x402 flow the handler fails BEFORE settlement, so the payer is
+    // not charged for a report that never materialized.
     const { data: rawResponse, usage } = await callLlmJsonWithUsage({
         systemPrompt: UNDERWRITER_SYSTEM_PROMPT,
         userPrompt: buildUnderwriterPrompt(
@@ -43,34 +52,12 @@ export async function evaluateProposalsWithAI(
             marketData,
         ),
     });
-
-    try {
-        return {
-            analysis: parseUnderwriterResponse(rawResponse, candidates),
-            usage,
-        };
-    } catch (error) {
-        // The payer already settled — degrade to neutral scores instead of
-        // failing a paid request over a malformed LLM response.
-        console.error(
-            'Underwriter LLM response failed validation, using fallback:',
-            error instanceof Error ? error.message : error,
-        );
-        return {
-            analysis: {
-                overallSummary:
-                    'AI evaluation could not be validated for this pool; showing neutral fallback scores.',
-                evaluations: candidates.map((candidate) => ({
-                    proposalId: candidate.id,
-                    fitScore: 50,
-                    riskLevel: "MEDIUM" as const,
-                    recommendation:
-                        'Candidate passed the hard filters. AI evaluation was unavailable for this report.',
-                })),
-            },
-            usage,
-        };
-    }
+    const analysis = parseUnderwriterResponse(rawResponse, candidates);
+    log.info(`AI underwriting OK: ${analysis.evaluations.length} evaluations`);
+    return {
+        analysis,
+        usage,
+    };
 }
 
 /** Validates the LLM response and ensures it evaluates exactly the supplied proposals. */
