@@ -280,10 +280,11 @@ describe('agentTools registry', () => {
     expect(typeof agentTools.searchSubgraphs).toBe('function');
   });
 
-  it('should have exactly two tools', () => {
+  it('should expose the dynamic yield tool alongside the raw MCP tools', () => {
     const keys = Object.keys(agentTools);
-    expect(keys).toHaveLength(2);
+    expect(keys).toHaveLength(3);
     expect(keys).toContain('querySubgraph');
     expect(keys).toContain('searchSubgraphs');
+    expect(keys).toContain('getDynamicYieldOpportunities');
   });
 });

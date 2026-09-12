@@ -1,10 +1,8 @@
 import { graphMcpClient } from './graph-mcp.client.js';
-import { MESSARI_MULTI_ASSET_QUERY } from './subgraphs.config.js';
 import {
-  DynamicYieldQuery,
+  ApyMethod,
   DynamicYieldOpportunity,
-  GraphFeedError,
-  RISK_PROFILE_TVLS,
+  DynamicYieldQuery,
   SupportedChain,
 } from './graph-feed.types.js';
 
@@ -13,12 +11,11 @@ interface DiscoveredCandidate {
   displayName: string;
 }
 
-interface DynamicMessariMarket {
-  name: string | null;
-  isActive?: boolean;
-  inputToken?: { id?: string; symbol: string };
-  totalValueLockedUSD: string;
-  rates?: Array<{ rate: string; side: string; type: string }>;
+type DynamicRow = Record<string, unknown>;
+interface YieldReading {
+  apy: number;
+  method: ApyMethod;
+  confidence: 'high' | 'medium';
 }
 
 const ASSET_ALIASES: Record<string, string> = {
@@ -30,108 +27,93 @@ const ASSET_ALIASES: Record<string, string> = {
   DAI: 'DAI',
 };
 
-/** A candidate deployment must expose this Messari `Market` shape to be used. */
-const REQUIRED_MARKET_FIELDS = [
-  'rates',
-  'inputToken',
-  'totalValueLockedUSD',
-  'isActive',
-];
-
-const MARKET_SCHEMA_CHECK_QUERY = `
-  query MarketSchemaCheck {
-    __type(name: "Market") {
+const DEFAULT_TVL_FLOOR_USD = 1_000_000;
+const MIN_USABLE_APY = 0.0001;
+const MAX_CANDIDATES_PROBED = 16;
+const CANDIDATE_BATCH_SIZE = 4;
+const MCP_SOURCE_TAG = 'The Graph Subgraph MCP (dynamic discovery)';
+const ROOT_SCHEMA_QUERY = `
+  query DynamicRootSchema {
+    __schema {
+      queryType {
+        fields {
+          name
+          type { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name } } } } }
+        }
+      }
+    }
+  }
+`;
+const TYPE_SCHEMA_QUERY = `
+  query DynamicTypeSchema($typeName: String!) {
+    __type(name: $typeName) {
       fields {
         name
+        type { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name } } } } }
       }
     }
   }
 `;
 
-/** Cap on deployments probed per discovery run (schema validation is not free). */
-const MAX_CANDIDATES_PROBED = 8;
-
-const MCP_SOURCE_TAG = 'The Graph Subgraph MCP (dynamic discovery)';
-
 /**
- * Fully dynamic Engine B over the Subgraph MCP.
- *
- * There are NO pinned protocol names, deployment IDs, or queries in this
- * path: candidates are discovered at runtime from generic category keywords
- * only, every deployment is schema-validated against the Messari `Market`
- * shape before use, and every returned opportunity carries its exact
- * provenance (`deploymentId`). Nothing usable discovered → `GraphFeedError`
- * (never a fabricated value).
+ * Dynamic Engine B. Discovery is intentionally tolerant: the MCP may return
+ * Messari markets, vaults, staking rows, or aggregator pools. The service
+ * normalizes the common token, TVL, and yield fields without requiring a
+ * particular entity schema, and a bad deployment only removes that candidate.
  */
 export class McpMarketService {
   async getDynamicYieldOpportunities(
     query: DynamicYieldQuery,
   ): Promise<DynamicYieldOpportunity[]> {
-    const floorUsd =
-      query.minTvlUsd ?? RISK_PROFILE_TVLS[query.riskProfile];
+    const floorUsd = Math.max(0, query.minTvlUsd ?? DEFAULT_TVL_FLOOR_USD);
     const tierThresholdUsd = floorUsd * 10;
     const keywords =
       query.protocolKeywords && query.protocolKeywords.length > 0
         ? query.protocolKeywords
         : ['lending'];
-    const limit = query.limit ?? 20;
-
+    const limit = Math.max(0, query.limit ?? 20);
     const candidates = await this.discoverCandidates(keywords);
     if (candidates.length === 0) {
-      throw new GraphFeedError(
-        'MCP_UNAVAILABLE',
-        `dynamic MCP discovery found no deployments for keywords [${keywords.join(', ')}] — refusing to fabricate opportunities`,
-      );
+      console.warn('[McpMarket] discovery returned no candidates');
+      return [];
     }
 
-    const candidateErrors: { target: string; error: string }[] = [];
     const opportunities: DynamicYieldOpportunity[] = [];
+    let rejectedCandidates = 0;
     const timestamp = Date.now();
-
-    for (const candidate of candidates.slice(0, MAX_CANDIDATES_PROBED)) {
-      try {
-        const schemaOk = await this.validateMarketSchema(candidate.subgraphId);
-        if (!schemaOk) {
-          candidateErrors.push({
-            target: candidate.displayName,
-            error: 'deployment does not expose the Messari Market schema',
-          });
-          continue;
-        }
-
-        const result = await graphMcpClient.queryDynamic(
-          candidate.subgraphId,
-          MESSARI_MULTI_ASSET_QUERY,
-        );
-        // queryDynamic returns the parsed GraphQL response: { data: { markets } }
-        const markets = (
-          result?.data as { data?: { markets?: DynamicMessariMarket[] } } | null
-        )?.data?.markets;
-
-        for (const market of markets ?? []) {
-          const opportunity = this.toOpportunity(
-            market,
-            candidate,
-            query.chains,
-            floorUsd,
-            tierThresholdUsd,
-            timestamp,
-          );
-          if (opportunity) opportunities.push(opportunity);
-        }
-      } catch (err) {
-        candidateErrors.push({
-          target: candidate.displayName,
-          error: err instanceof Error ? err.message : String(err),
-        });
+    const selectedCandidates = candidates.slice(0, MAX_CANDIDATES_PROBED);
+    for (let start = 0; start < selectedCandidates.length; start += CANDIDATE_BATCH_SIZE) {
+      const batch = selectedCandidates.slice(start, start + CANDIDATE_BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map(async (candidate) => {
+          const result = await this.queryCandidate(candidate);
+          const rows = this.extractRows(result);
+          return rows
+            .map((row) =>
+              this.toOpportunity(
+                row,
+                candidate,
+                query.chains,
+                query.excludeMarkets,
+                floorUsd,
+                tierThresholdUsd,
+                timestamp,
+              ),
+            )
+            .filter((opportunity): opportunity is DynamicYieldOpportunity =>
+              opportunity !== null,
+            );
+        }),
+      );
+      for (const result of results) {
+        if (result.status === 'fulfilled') opportunities.push(...result.value);
+        else rejectedCandidates += 1;
       }
     }
 
-    if (opportunities.length === 0) {
-      throw new GraphFeedError(
-        'MCP_UNAVAILABLE',
-        `dynamic MCP discovery found no usable markets above the ${floorUsd} USD gate — refusing to fabricate opportunities`,
-        { candidateErrors },
+    if (rejectedCandidates > 0) {
+      console.warn(
+        `[McpMarket] skipped ${rejectedCandidates} deployment(s) with unavailable or incompatible schemas`,
       );
     }
 
@@ -139,115 +121,312 @@ export class McpMarketService {
     return opportunities.slice(0, limit);
   }
 
-  /**
-   * Runtime discovery from generic category keywords only. The MCP client
-   * already probes hyphen/space keyword variants; rows are read across the
-   * payload shapes the search service emits and deduplicated by deployment.
-   */
   private async discoverCandidates(
     keywords: string[],
   ): Promise<DiscoveredCandidate[]> {
     const byId = new Map<string, DiscoveredCandidate>();
+    const searches = await Promise.allSettled(
+      keywords.map((keyword) => graphMcpClient.searchSubgraphs(keyword)),
+    );
 
-    for (const keyword of keywords) {
-      let raw: Record<string, unknown> | null = null;
-      try {
-        raw = await graphMcpClient.searchSubgraphs(keyword);
-      } catch (err) {
+    for (const search of searches) {
+      if (search.status === 'rejected') {
         console.warn(
-          `[McpMarket] keyword search failed for "${keyword}":`,
-          err instanceof Error ? err.message : err,
+          '[McpMarket] keyword search failed:',
+          search.reason instanceof Error ? search.reason.message : search.reason,
         );
         continue;
       }
+      const raw = search.value;
       if (!raw) continue;
-
       const rows = Array.isArray(raw.results)
         ? raw.results
         : Array.isArray(raw.subgraphs)
           ? raw.subgraphs
           : [];
-
       for (const row of rows) {
-        const subgraphId =
-          typeof row?.subgraphId === 'string'
-            ? row.subgraphId
-            : typeof row?.id === 'string'
-              ? row.id
-              : '';
+        if (!row || typeof row !== 'object') continue;
+        const record = row as DynamicRow;
+        const metadata = this.asRecord(record.metadata);
+        const subgraphId = this.asString(record.subgraphId ?? record.id);
         if (!subgraphId || byId.has(subgraphId)) continue;
         const displayName =
-          typeof row?.displayName === 'string'
-            ? row.displayName
-            : typeof row?.metadata?.displayName === 'string'
-              ? row.metadata.displayName
-              : subgraphId;
+          this.asString(record.displayName) ??
+          this.asString(metadata?.displayName) ??
+          subgraphId;
         byId.set(subgraphId, { subgraphId, displayName });
       }
     }
-
     return [...byId.values()];
   }
 
-  /**
-   * Schema trust gate: probe the deployment's `Market` entity shape via
-   * introspection and require the Messari standardized fields. Deployments
-   * with custom schemas (e.g. Compound v3 Base) are rejected here instead of
-   * crashing the unified query later.
-   */
-  private async validateMarketSchema(subgraphId: string): Promise<boolean> {
-    const result = await graphMcpClient.queryDynamic(
-      subgraphId,
-      MARKET_SCHEMA_CHECK_QUERY,
+  private extractRows(result: Record<string, unknown> | null): DynamicRow[] {
+    const outer = this.asRecord(result?.data) ?? result;
+    const payload = this.asRecord(outer?.data) ?? outer;
+    if (!payload) return [];
+    for (const key of [
+      'markets',
+      'lendingMarkets',
+      'vaults',
+      'stakingPools',
+      'pools',
+      'strategies',
+      'vaultShares',
+      'farms',
+      'reserves',
+      'tokens',
+      'opportunities',
+      'assets',
+    ]) {
+      const rows = payload[key];
+      if (Array.isArray(rows)) {
+        return rows.filter((row): row is DynamicRow =>
+          Boolean(row && typeof row === 'object'),
+        );
+      }
+    }
+    // Custom deployments often expose a differently named root collection.
+    // Keep the schema-agnostic service useful without requiring a new key for
+    // every vault, strategy, or pool schema.
+    for (const value of Object.values(payload)) {
+      if (Array.isArray(value)) {
+        const rows = value.filter((row): row is DynamicRow =>
+          Boolean(row && typeof row === 'object'),
+        );
+        if (rows.length > 0) return rows;
+      }
+    }
+    return [];
+  }
+
+  private async queryCandidate(
+    candidate: DiscoveredCandidate,
+  ): Promise<Record<string, unknown> | null> {
+    const schema = await graphMcpClient.queryDynamic(
+      candidate.subgraphId,
+      ROOT_SCHEMA_QUERY,
     );
-    const fields = (
-      result?.data as
-        | { data?: { __type?: { fields?: Array<{ name: string }> | null } } }
-        | undefined
-    )?.data?.__type?.fields;
-    const names = new Set((fields ?? []).map((field) => field.name));
-    return REQUIRED_MARKET_FIELDS.every((field) => names.has(field));
+    const rootFields = this.extractSchemaFields(schema);
+    const root = this.selectRootField(rootFields);
+    if (!root) return null;
+
+    const rootType = this.namedType(root.type);
+    if (!rootType) return null;
+    const typeSchema = await graphMcpClient.queryDynamic(
+      candidate.subgraphId,
+      TYPE_SCHEMA_QUERY,
+      { typeName: rootType },
+    );
+    const fields = this.extractSchemaFields(typeSchema);
+    const selection = await this.buildSelection(fields, candidate.subgraphId);
+    if (!selection) return null;
+
+    const rootName = this.asString(root.name);
+    if (!rootName) return null;
+    const pagination = this.isList(root.type) ? '(first: 100)' : '';
+    const query = `query DynamicYield { ${rootName}${pagination} { ${selection} } }`;
+    try {
+      const result = await graphMcpClient.queryDynamic(candidate.subgraphId, query);
+      if (result) return result;
+    } catch (error) {
+      console.debug(
+        `[McpMarket] ${candidate.displayName} dynamic selection failed:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+
+    // Some MCP deployments return an empty payload for optional fields even
+    // though the root entity is queryable. Retry with the smallest common
+    // selection instead of discarding a deployment that may contain APY data.
+    const fallback = `query DynamicYieldFallback { ${rootName}${pagination} { ${selection} } }`;
+    try {
+      return await graphMcpClient.queryDynamic(candidate.subgraphId, fallback);
+    } catch (error) {
+      console.debug(
+        `[McpMarket] ${candidate.displayName} fallback selection failed:`,
+        error instanceof Error ? error.message : error,
+      );
+      return null;
+    }
+  }
+
+  private selectRootField(fields: DynamicRow[]): DynamicRow | null {
+    const preferred = [
+      'markets',
+      'lendingMarkets',
+      'vaults',
+      'pools',
+      'stakingPools',
+      'strategies',
+      'vaultShares',
+      'farms',
+      'reserves',
+      'tokens',
+    ];
+    for (const name of preferred) {
+      const field = fields.find(
+        (candidate) => candidate.name === name && this.isList(candidate.type),
+      );
+      if (field) return field;
+    }
+    return (
+      fields.find(
+        (field) =>
+          this.isList(field.type) &&
+          /market|vault|pool|reserve|lending|yield|token/i.test(
+            this.asString(field.name) ?? '',
+          ),
+      ) ?? null
+    );
+  }
+
+  private async buildSelection(
+    fields: DynamicRow[],
+    subgraphId: string,
+  ): Promise<string> {
+    const names = new Set(fields.map((field) => field.name));
+    const scalarFields = [
+      'id',
+      'name',
+      'symbol',
+      'totalValueLockedUSD',
+      'tvlUSD',
+      'tvl',
+      'totalAssetsUSD',
+      'apy',
+      'apr',
+      'netApy',
+      'supplyApy',
+      'supplyApr',
+      'annualizedApy',
+      'annualizedApr',
+      'yieldRate',
+      'yield',
+      'apyNet',
+      'totalAssets',
+      'assetsUnderManagementUSD',
+      'isActive',
+      'active',
+    ].filter((name) => names.has(name));
+    const nestedFields = [
+      'inputToken',
+      'token',
+      'asset',
+      'underlyingAsset',
+      'underlyingToken',
+      'underlying',
+    ].filter((name) => names.has(name));
+    const selections = [...scalarFields];
+    for (const field of nestedFields) {
+      const nested = fields.find((candidate) => candidate.name === field);
+      const nestedType = this.namedType(nested?.type);
+      if (!nestedType) continue;
+      const nestedSchema = await graphMcpClient.queryDynamic(
+        subgraphId,
+        TYPE_SCHEMA_QUERY,
+        { typeName: nestedType },
+      ).catch(() => null);
+      const nestedFields = this.extractSchemaFields(nestedSchema);
+      const nestedNames = new Set(nestedFields.map((item) => item.name));
+      const nestedSelection = [
+        'id',
+        'symbol',
+        'name',
+        'timestamp',
+        'sharePrice',
+        'pricePerShare',
+        'exchangeRate',
+        'totalAssetsUSD',
+        'totalValueLockedUSD',
+      ].filter((name) => nestedNames.has(name));
+      if (nestedSelection.length > 0) {
+        selections.push(`${field} { ${nestedSelection.join(' ')} }`);
+      }
+    }
+    if (names.has('rates')) selections.push('rates { rate side type }');
+    return selections.join(' ');
+  }
+
+  private extractSchemaFields(result: Record<string, unknown> | null): DynamicRow[] {
+    const data = this.asRecord(this.asRecord(result?.data)?.data) ?? this.asRecord(result?.data);
+    const type = this.asRecord(data?.__schema) ?? this.asRecord(data?.__type);
+    const fields = type?.queryType
+      ? this.asRecord(type.queryType)?.fields
+      : type?.fields;
+    return Array.isArray(fields)
+      ? fields.filter((field): field is DynamicRow => Boolean(field && typeof field === 'object'))
+      : [];
+  }
+
+  private isList(type: unknown): boolean {
+    const record = this.asRecord(type);
+    return record?.kind === 'LIST' || this.isList(record?.ofType);
+  }
+
+  private namedType(type: unknown): string | undefined {
+    const record = this.asRecord(type);
+    if (!record) return undefined;
+    if (typeof record.name === 'string') return record.name;
+    return this.namedType(record.ofType);
   }
 
   private toOpportunity(
-    market: DynamicMessariMarket,
+    row: DynamicRow,
     candidate: DiscoveredCandidate,
     chains: SupportedChain[] | undefined,
+    excludeMarkets: DynamicYieldQuery['excludeMarkets'],
     floorUsd: number,
     tierThresholdUsd: number,
     timestamp: number,
   ): DynamicYieldOpportunity | null {
-    if (market.isActive === false) return null;
+    if (row.isActive === false || row.active === false) return null;
 
-    const rawSymbol = market.inputToken?.symbol?.toUpperCase();
-    const symbol = rawSymbol ? ASSET_ALIASES[rawSymbol] : undefined;
+    const token =
+      this.asRecord(row.inputToken) ??
+      this.asRecord(row.token) ??
+      this.asRecord(row.asset) ??
+      this.asRecord(row.underlyingAsset) ??
+      this.asRecord(row.underlying) ??
+      this.asRecord(row.underlyingToken);
+    const rawSymbol =
+      this.asString(row.symbol) ??
+      this.asString(token?.symbol) ??
+      this.asString(row.assetSymbol);
+    const symbol = rawSymbol ? ASSET_ALIASES[rawSymbol.toUpperCase()] : undefined;
     if (!symbol) return null;
-    if (!market.rates || market.rates.length === 0) return null;
 
-    const tvl = this.toFiniteNonNegativeNumber(market.totalValueLockedUSD);
+    const tvl = this.toNumber(
+      row.totalValueLockedUSD ??
+        row.tvlUSD ??
+        row.tvl ??
+        row.totalAssetsUSD ??
+        row.totalAssets ??
+          row.totalManagedAssetsUSD ??
+          row.assetsUnderManagementUSD,
+    );
     if (tvl < floorUsd) return null;
 
-    let supplyApy = 0;
-    for (const rate of market.rates) {
-      if (rate.type !== 'VARIABLE' || rate.side !== 'LENDER') continue;
-      const parsed = Number(rate.rate);
-      if (!Number.isFinite(parsed)) continue;
-      supplyApy = this.normalizeRate(parsed);
-    }
-    if (supplyApy <= 0) return null;
+    const yieldReading = this.readYield(row);
+    if (yieldReading.apy < MIN_USABLE_APY) return null;
 
     const chain = this.inferChain(candidate.displayName);
-    // Chain gate is label-based: a candidate whose chain cannot be proven
-    // from its name is kept only when the caller did not restrict chains.
-    if (chains && chains.length > 0 && chain && !chains.includes(chain)) {
+    if (chains && chains.length > 0 && !chains.includes(chain)) return null;
+
+    if (this.isCoveredByEngineA(candidate.displayName, chain, symbol, excludeMarkets)) {
       return null;
     }
 
+    const category = this.inferCategory(candidate.displayName, row);
+
     return {
       protocol: candidate.displayName,
-      chain: chain ?? candidate.displayName,
+      chain,
       symbol,
-      supplyApy: Number(supplyApy.toFixed(4)),
+      category,
+      supplyApy: Number(yieldReading.apy.toFixed(4)),
+      apyMethod: yieldReading.method,
+      confidence: yieldReading.confidence,
+      riskClass: this.inferRiskClass(category),
       totalValueLockedUSD: tvl,
       tier: tvl >= tierThresholdUsd ? 'established' : 'emerging',
       deploymentId: candidate.subgraphId,
@@ -256,31 +435,163 @@ export class McpMarketService {
     };
   }
 
-  private inferChain(displayName: string): SupportedChain | null {
+  private isCoveredByEngineA(
+    protocol: string,
+    chain: SupportedChain,
+    symbol: string,
+    existing: DynamicYieldQuery['excludeMarkets'],
+  ): boolean {
+    if (!existing || existing.length === 0) return false;
+    const normalizedProtocol = this.protocolFamily(protocol);
+    return existing.some(
+      (market) =>
+        market.symbol.toUpperCase() === symbol &&
+        market.chain === chain &&
+        this.protocolFamily(market.protocol) === normalizedProtocol,
+    );
+  }
+
+  private protocolFamily(protocol: string): string {
+    const normalized = protocol.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (normalized.includes('aavev2')) return 'aave-v2';
+    if (normalized.includes('aavev3')) return 'aave-v3';
+    if (normalized.includes('compoundv2')) return 'compound-v2';
+    if (normalized.includes('compoundv3')) return 'compound-v3';
+    if (normalized.includes('aave')) return 'aave';
+    if (normalized.includes('compound')) return 'compound';
+    if (normalized.includes('spark')) return 'spark';
+    if (normalized.includes('morpho')) return 'morpho';
+    return normalized;
+  }
+
+  private inferCategory(
+    protocol: string,
+    row: DynamicRow,
+  ): DynamicYieldOpportunity['category'] {
+    const label = `${protocol} ${String(row.type ?? '')} ${String(row.category ?? '')}`.toLowerCase();
+    if (label.includes('vault')) return 'vault';
+    if (label.includes('stak')) return 'staking';
+    if (label.includes('pool') || label.includes('liquid')) return 'liquidity';
+    if (
+      label.includes('lend') ||
+      label.includes('aave') ||
+      label.includes('compound') ||
+      label.includes('spark') ||
+      label.includes('morpho')
+    ) {
+      return 'lending';
+    }
+    return 'other';
+  }
+
+  private readYield(row: DynamicRow): YieldReading {
+    const rates = Array.isArray(row.rates) ? row.rates : [];
+    for (const item of rates) {
+      if (!item || typeof item !== 'object') continue;
+      const rate = item as DynamicRow;
+      if (rate.side !== undefined && rate.side !== 'LENDER') continue;
+      if (rate.type !== undefined && rate.type !== 'VARIABLE') continue;
+      const value = this.toNumber(rate.rate ?? rate.apy ?? rate.apr);
+      if (value > 0) {
+        return { apy: this.normalizeRate(value), method: 'direct-rate', confidence: 'high' };
+      }
+    }
+    const value = this.toNumber(
+      row.supplyApy ??
+        row.apy ??
+        row.netApy ??
+        row.supplyApr ??
+        row.apr ??
+        row.annualPercentageYield ??
+        row.annualPercentageRate ??
+        row.annualizedApy ??
+        row.annualizedApr ??
+        row.apyNet ??
+        row.yieldRate ??
+        row.yield,
+    );
+    if (value > 0) {
+      return { apy: this.normalizeRate(value), method: 'direct-rate', confidence: 'high' };
+    }
+
+    const snapshots = this.collectSnapshots(row);
+    if (snapshots.length < 2) {
+      return { apy: 0, method: 'share-price-growth', confidence: 'medium' };
+    }
+    const oldest = snapshots[0];
+    const newest = snapshots[snapshots.length - 1];
+    const oldValue = this.snapshotValue(oldest);
+    const newValue = this.snapshotValue(newest);
+    const oldTime = this.toNumber(oldest.timestamp);
+    const newTime = this.toNumber(newest.timestamp);
+    const days = (newTime - oldTime) / 86_400;
+    if (!(oldValue > 0 && newValue > 0 && days > 0)) {
+      return { apy: 0, method: 'share-price-growth', confidence: 'medium' };
+    }
+    const growth = newValue / oldValue;
+    const apy = Math.pow(growth, 365 / days) - 1;
+    return {
+      apy: Number.isFinite(apy) && apy >= 0 ? apy : 0,
+      method: 'share-price-growth',
+      confidence: days >= 7 ? 'high' : 'medium',
+    };
+  }
+
+  private collectSnapshots(row: DynamicRow): DynamicRow[] {
+    for (const key of ['snapshots', 'dailySnapshots', 'hourlySnapshots']) {
+      const snapshots = row[key];
+      if (Array.isArray(snapshots)) {
+        return snapshots
+          .filter((item): item is DynamicRow => Boolean(item && typeof item === 'object'))
+          .sort((a, b) => this.toNumber(a.timestamp) - this.toNumber(b.timestamp));
+      }
+    }
+    return [];
+  }
+
+  private snapshotValue(snapshot: DynamicRow): number {
+    return this.toNumber(
+      snapshot.sharePrice ??
+        snapshot.pricePerShare ??
+        snapshot.exchangeRate ??
+        snapshot.totalAssetsUSD ??
+        snapshot.totalValueLockedUSD,
+    );
+  }
+
+  private inferRiskClass(category: DynamicYieldOpportunity['category']):
+    DynamicYieldOpportunity['riskClass'] {
+    if (category === 'vault') return 'vault';
+    if (category === 'staking') return 'staking';
+    if (category === 'liquidity') return 'liquidity';
+    return 'lending';
+  }
+
+  private inferChain(displayName: string): SupportedChain {
     const label = displayName.toLowerCase();
     if (label.includes('arbitrum')) return 'Arbitrum';
     if (label.includes('base')) return 'Base';
-    if (label.includes('ethereum') || label.includes('mainnet'))
-      return 'Ethereum';
-    return null;
+    if (label.includes('polygon') || label.includes('matic')) return 'Polygon';
+    return 'Ethereum';
   }
 
-  private toFiniteNonNegativeNumber(value: string): number {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-  }
-
-  /**
-   * Normalize rate values into decimal APY fractions (independent copy —
-   * this service is decoupled from Engine A):
-   *   - Ray-scale payloads (>1e18) → /1e27
-   *   - Percentage APY (0.0001 < value <= 100) → /100
-   *   - Already-decimal values pass through unchanged.
-   */
   private normalizeRate(value: number): number {
     if (value > 1e18) return value / 1e27;
     if (value > 0.0001 && value <= 100) return value / 100;
     return value;
+  }
+
+  private toNumber(value: unknown): number {
+    const parsed = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  }
+
+  private asString(value: unknown): string | undefined {
+    return typeof value === 'string' && value.length > 0 ? value : undefined;
+  }
+
+  private asRecord(value: unknown): DynamicRow | null {
+    return value && typeof value === 'object' ? (value as DynamicRow) : null;
   }
 }
 

@@ -58,9 +58,8 @@ export const LENDING_SUBGRAPHS: SubgraphTarget[] = [
   { protocol: 'Spark', chain: 'Ethereum', subgraphId: 'GbKdmBe4ycCYCQLQSjqGg6UHYoYfbyJyq5WrG35pv1si', schema: 'messari-standardized' },
 ];
   // Unified Messari pattern, hardened against the duplicate-market and dust bugs:
-  //   - `isActive: true` — excludes paused/frozen markets (e.g. Aave Arbitrum
-  //     bridged USDC.e, which is active=false and previously leaked into
-  //     benchmarks as a duplicate "Aave v3 Arbitrum USDC" row).
+  //   - paused/frozen non-DAI markets are excluded client-side. Spark's DAI
+  //     reserve is currently reported inactive despite exposing live TVL/rates.
   //   - `totalValueLockedUSD_gte: MIN_TVL_USD` — excludes dust Morpho Blue
   //     isolated micro-markets so they never displace major stablecoin pools.
   //   - `first: 50` — Morpho Blue returns many tiny isolated markets per loan
@@ -76,7 +75,6 @@ export const LENDING_SUBGRAPHS: SubgraphTarget[] = [
         orderBy: totalValueLockedUSD
         orderDirection: desc
         where: {
-          isActive: true
           totalValueLockedUSD_gte: "${MIN_TVL_USD}"
           inputToken_: { symbol_in: ["USDC", "USDC.e", "USDbC", "USDCn", "USDT", "DAI"] }
         }

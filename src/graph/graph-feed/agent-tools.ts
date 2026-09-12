@@ -1,8 +1,11 @@
 import { graphMcpClient } from './graph-mcp.client.js';
 import type {
+  DynamicYieldOpportunity,
+  DynamicYieldQuery,
   RawQueryResult,
   SubgraphSearchResponse,
 } from './graph-feed.types.js';
+import { mcpMarketService } from './mcp-market.service.js';
 
 export async function querySubgraph(
   subgraphId: string,
@@ -85,9 +88,31 @@ export async function searchSubgraphs(
   }
 }
 
+export async function getDynamicYieldOpportunities(
+  query: DynamicYieldQuery,
+): Promise<{
+  opportunities: DynamicYieldOpportunity[];
+  isError: boolean;
+  error?: string;
+}> {
+  try {
+    return {
+      opportunities: await mcpMarketService.getDynamicYieldOpportunities(query),
+      isError: false,
+    };
+  } catch (error) {
+    return {
+      opportunities: [],
+      isError: true,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export const agentTools = {
   querySubgraph,
   searchSubgraphs,
+  getDynamicYieldOpportunities,
 };
 
 /**
@@ -128,9 +153,26 @@ export interface AgentToolDefinition {
  */
 export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   {
+    name: 'get_dynamic_yield_opportunities',
+    description:
+      'Discover live additive stablecoin yield opportunities through the Subgraph MCP. Engine A markets can be excluded by protocol, chain, and symbol. APY values are decimal fractions.',
+    parameters: {
+      type: 'object',
+      properties: {
+        riskProfile: { type: 'string', enum: ['low', 'mid'] },
+        chains: { type: 'array', items: { type: 'string' } },
+        protocolKeywords: { type: 'array', items: { type: 'string' } },
+        minTvlUsd: { type: 'number' },
+        limit: { type: 'integer' },
+        excludeMarkets: { type: 'array', items: { type: 'object' } },
+      },
+      required: ['riskProfile'],
+    },
+  },
+  {
     name: 'get_lending_hurdle_rate',
     description:
-      'Fetch live stablecoin lending supply APY benchmarks (Aave v3, Compound v3, Morpho Blue on Ethereum/Arbitrum/Base) via the Messari standardized subgraphs. Returns the average/max/min decimal APY plus the deepest live market. All APYs are DECIMAL FRACTIONS: 0.0335 = 3.35%.',
+      'Fetch live USDC, USDT, and DAI lending supply APY benchmarks across the configured Aave v3, Compound v3, Morpho Blue, and Spark standardized deployments. Returns average/max/min decimal APY plus the deepest live market. All APYs are DECIMAL FRACTIONS: 0.0335 = 3.35%.',
     parameters: {
       type: 'object',
       properties: {

@@ -101,8 +101,10 @@ export class GraphFeedError extends Error {
 // ===========================================================================
 
 export type RiskProfile = 'low' | 'mid';
-export type SupportedChain = 'Ethereum' | 'Arbitrum' | 'Base';
+export type SupportedChain = 'Ethereum' | 'Arbitrum' | 'Base' | 'Polygon';
 export type MarketTier = 'established' | 'emerging';
+export type ApyMethod = 'direct-rate' | 'share-price-growth' | 'fee-annualization';
+export type YieldRiskClass = 'lending' | 'vault' | 'staking' | 'liquidity';
 
 /** Trust-gate defaults per risk profile (override with DynamicYieldQuery.minTvlUsd). */
 export const RISK_PROFILE_TVLS: Record<RiskProfile, number> = {
@@ -115,7 +117,7 @@ export const RISK_PROFILE_TVLS: Record<RiskProfile, number> = {
  * these parameters only.
  */
 export interface DynamicYieldQuery {
-  /** Trust gate: 'low' (default floor 10M USD, blue-chip depth) or 'mid' (1M USD). */
+  /** Low-risk defaults to $10M; mid-risk defaults to $1M and both can be overridden. */
   riskProfile: RiskProfile;
   /** Chains to consider. Default: all three supported chains. */
   chains?: SupportedChain[];
@@ -125,13 +127,24 @@ export interface DynamicYieldQuery {
   minTvlUsd?: number;
   /** Max opportunities returned. Default: 20. */
   limit?: number;
+  /** Engine A markets to exclude when MCP is used as an additive source. */
+  excludeMarkets?: Array<{
+    protocol: string;
+    chain: string;
+    symbol: string;
+  }>;
 }
 
 /** A live yield opportunity discovered dynamically via the Subgraph MCP. */
 export interface DynamicYieldOpportunity {
   protocol: string;
-  chain: string;
+  chain: SupportedChain;
   symbol: string;
+  /** Runtime classification used to rank and group additive opportunities. */
+  category: 'lending' | 'vault' | 'staking' | 'liquidity' | 'other';
+  apyMethod: ApyMethod;
+  confidence: 'high' | 'medium';
+  riskClass: YieldRiskClass;
   /** Decimal APY fraction (0.0335 = 3.35%). */
   supplyApy: number;
   totalValueLockedUSD: number;

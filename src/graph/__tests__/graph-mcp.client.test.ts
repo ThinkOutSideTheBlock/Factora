@@ -298,6 +298,23 @@ describe('GraphMcpClient — searchSubgraphs', () => {
     expect(result).toEqual(mockResult);
   });
 
+  it('should reconnect and retry once after a transient fetch failure', async () => {
+    mockCallTool
+      .mockRejectedValueOnce(new Error('MCP error -32001: mcp-remote: fetch failed'))
+      .mockResolvedValueOnce({
+        content: [{ type: 'text', text: JSON.stringify({ resultsCount: 1, results: [{ id: 'recovered' }] }) }],
+      });
+
+    const result = await client.searchSubgraphs('aave');
+
+    expect(result).toEqual({
+      resultsCount: 1,
+      results: [{ id: 'recovered' }],
+    });
+    expect(mockCallTool).toHaveBeenCalledTimes(2);
+    expect(mockConnect).toHaveBeenCalledTimes(2);
+  });
+
   it('should throw when search tool returns isError', async () => {
     mockCallTool.mockResolvedValueOnce({
       isError: true,

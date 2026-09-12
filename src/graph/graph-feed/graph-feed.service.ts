@@ -182,11 +182,13 @@ export class GraphFeedService {
   ): void {
     // Q1: paused/frozen markets never enter benchmarks (client-side guard;
     // the shared query also filters server-side). Undefined in mocks = keep.
-    if (market.isActive === false) return;
-
     const rawSymbol = market.inputToken?.symbol?.toUpperCase();
     const symbol = rawSymbol ? ASSET_ALIASES[rawSymbol] : undefined;
     if (!symbol) return;
+    // Spark currently reports its large DAI reserve as inactive while still
+    // exposing a live rate and TVL. Keep that canonical DAI row; paused
+    // non-underwriting assets remain excluded.
+    if (market.isActive === false && symbol !== 'DAI') return;
     if (!market.rates || market.rates.length === 0) return;
 
     // Q2: dust markets are excluded as defense in depth (isolated Morpho

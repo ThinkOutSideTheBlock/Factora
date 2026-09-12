@@ -21,6 +21,10 @@ interface McpTransportLike {
   close(): Promise<void>;
 }
 
+const MCP_RETRY_DELAY_MS = 250;
+const MCP_CALL_TIMEOUT_MS = 20_000;
+const MCP_OUTAGE_COOLDOWN_MS = 10_000;
+
 /**
  * Singleton lifecycle manager for the Subgraph MCP server.
  *
@@ -41,6 +45,8 @@ export class GraphMcpClient {
   private readonly apiKey: string;
   private readonly command: string;
   private readonly commandArgs: string[];
+  private toolQueue: Promise<unknown> = Promise.resolve();
+  private unavailableUntil = 0;
 
   constructor(
     apiKey?: string,
@@ -59,6 +65,7 @@ export class GraphMcpClient {
 
   async initialize(): Promise<boolean> {
     if (this.isConnected) return true;
+    if (Date.now() < this.unavailableUntil) return false;
     if (this.initPromise) return this.initPromise;
 
     this.initPromise = this.doInitialize().catch((error) => {
@@ -68,6 +75,7 @@ export class GraphMcpClient {
       );
       this.isConnected = false;
       this.initPromise = null;
+      this.unavailableUntil = Date.now() + MCP_OUTAGE_COOLDOWN_MS;
       return false;
     });
     return this.initPromise;
@@ -96,6 +104,7 @@ export class GraphMcpClient {
     this.client = client as unknown as McpClientLike;
     this.transport = transport as unknown as McpTransportLike;
     this.isConnected = true;
+    this.unavailableUntil = 0;
     return true;
   }
 
@@ -128,8 +137,7 @@ export class GraphMcpClient {
     query: string,
     variables?: Record<string, unknown>,
   ): Promise<Record<string, unknown> | null> {
-    const client = await this.ensureConnected();
-    const result = (await client.callTool({
+    const result = (await this.callToolWithReconnect({
       name: 'execute_query_by_subgraph_id',
       arguments: {
         subgraph_id: subgraphId,
@@ -159,7 +167,6 @@ export class GraphMcpClient {
   async searchSubgraphs(
     keyword: string,
   ): Promise<Record<string, unknown> | null> {
-    const client = await this.ensureConnected();
     const variants = GraphMcpClient.buildKeywordVariants(keyword);
 
     let lastFailure: unknown = null;
@@ -168,12 +175,13 @@ export class GraphMcpClient {
     for (const variant of variants) {
       let result: McpToolCallResult;
       try {
-        result = (await client.callTool({
+        result = (await this.callToolWithReconnect({
           name: 'search_subgraphs_by_keyword',
           arguments: { keyword: variant },
         })) as McpToolCallResult;
       } catch (error) {
         lastFailure = error;
+        if (GraphMcpClient.isTransientTransportError(error)) break;
         continue;
       }
 
@@ -198,6 +206,62 @@ export class GraphMcpClient {
     throw lastFailure instanceof Error
       ? lastFailure
       : new Error('MCP subgraph search failed');
+  }
+
+  /** Retry one transient remote-transport failure after rebuilding the MCP connection. */
+  private async callToolWithReconnect(params: {
+    name: string;
+    arguments: Record<string, unknown>;
+  }): Promise<unknown> {
+    return this.enqueueToolCall(async () => {
+      let client = await this.ensureConnected();
+      try {
+        return await this.withTimeout(client.callTool(params), params.name);
+      } catch (error) {
+        if (!GraphMcpClient.isTransientTransportError(error)) throw error;
+        console.warn(
+          `[GraphMcpClient] ${params.name} transport failed; reconnecting once:`,
+          error instanceof Error ? error.message : error,
+        );
+        await this.close();
+        await new Promise((resolve) => setTimeout(resolve, MCP_RETRY_DELAY_MS));
+        client = await this.ensureConnected();
+        return this.withTimeout(client.callTool(params), params.name);
+      }
+    });
+  }
+
+  private enqueueToolCall<T>(operation: () => Promise<T>): Promise<T> {
+    const next = this.toolQueue.then(operation, operation);
+    this.toolQueue = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }
+
+  private async withTimeout<T>(promise: Promise<T>, operation: string): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`MCP operation timed out: ${operation}`)),
+            MCP_CALL_TIMEOUT_MS,
+          );
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  private static isTransientTransportError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return /fetch failed|mcp-remote|MCP Client offline|connection closed|transport|ECONNRESET|ETIMEDOUT|EPIPE/i.test(
+      message,
+    );
   }
 
   /**
