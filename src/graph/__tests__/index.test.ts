@@ -36,13 +36,27 @@ describe('graph-feed barrel exports', () => {
     expect(graphFeed.graphMcpClient).toBeInstanceOf(graphFeed.GraphMcpClient);
   });
 
+  it('should export the McpMarketService class and singleton (Engine B)', () => {
+    expect(graphFeed.McpMarketService).toBeDefined();
+    expect(typeof graphFeed.McpMarketService).toBe('function');
+    expect(graphFeed.mcpMarketService).toBeDefined();
+    expect(graphFeed.mcpMarketService).toBeInstanceOf(graphFeed.McpMarketService);
+  });
+
   it('should export subgraph configuration constants', () => {
     expect(graphFeed.LENDING_SUBGRAPHS).toBeDefined();
     expect(Array.isArray(graphFeed.LENDING_SUBGRAPHS)).toBe(true);
     expect(graphFeed.MESSARI_MULTI_ASSET_QUERY).toBeDefined();
     expect(typeof graphFeed.MESSARI_MULTI_ASSET_QUERY).toBe('string');
-    expect(graphFeed.UNISWAP_V3_ETHEREUM_SUBGRAPH_ID).toBeDefined();
-    expect(graphFeed.UNISWAP_TOP_STABLE_POOLS_QUERY).toBeDefined();
+  });
+
+  it('should export the strict error contract types', () => {
+    expect(graphFeed.GraphFeedError).toBeDefined();
+    expect(typeof graphFeed.GraphFeedError).toBe('function');
+    expect(graphFeed.RISK_PROFILE_TVLS).toEqual({
+      low: 10_000_000,
+      mid: 1_000_000,
+    });
   });
 
   it('should export TypeScript interfaces as type-only (runtime presence check)', () => {

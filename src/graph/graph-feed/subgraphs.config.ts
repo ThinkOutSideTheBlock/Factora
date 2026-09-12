@@ -40,26 +40,23 @@
   //     the network — dropped entirely. Base is the third chain.//
   // Missing deployments are excluded — the agent falls back to baseline rates
   // when fewer sources return data.
-  export const LENDING_SUBGRAPHS: SubgraphTarget[] = [
-    // ── Aave v3 ──────────────────────────────────────────────────────────
-    { protocol: 'Aave v3', chain: 'Ethereum', subgraphId: 'JCNWRypm7FYwV8fx5HhzZPSFaMxgkPuw4TnR3Gpi81zk', schema: 'messari-standardized' },
-    { protocol: 'Aave v3', chain: 'Arbitrum', subgraphId: '4xyasjQeREe7PxnF6wVdobZvCw5mhoHZq3T7guRpuNPf', schema: 'messari-standardized' },
+export const LENDING_SUBGRAPHS: SubgraphTarget[] = [
+  // ── Aave v3 ──────────────────────────────────────────────────────────
+  { protocol: 'Aave v3', chain: 'Ethereum', subgraphId: 'JCNWRypm7FYwV8fx5HhzZPSFaMxgkPuw4TnR3Gpi81zk', schema: 'messari-standardized' },
+  { protocol: 'Aave v3', chain: 'Arbitrum', subgraphId: '4xyasjQeREe7PxnF6wVdobZvCw5mhoHZq3T7guRpuNPf', schema: 'messari-standardized' },
+  { protocol: 'Aave v3', chain: 'Optimism', subgraphId: '3RWFxWNstn4nP3dXiDfKi9GgBoHx7xzc7APkXs1MLEgi', schema: 'messari-standardized' },
 
-    // ── Compound v3 ──────────────────────────────────────────────────────
-    { protocol: 'Compound v3', chain: 'Ethereum', subgraphId: 'AwoxEZbiWLvv6e3QdvdMZw4WDURdGbvPfHmZRc8Dpfz9', schema: 'messari-standardized' },
-    { protocol: 'Compound v3', chain: 'Arbitrum', subgraphId: '5MjRndNWGhqvNX7chUYLQDnvEgc8DaH8eisEkcJt71SR', schema: 'messari-standardized' },
+  // ── Compound v3 ──────────────────────────────────────────────────────
+  { protocol: 'Compound v3', chain: 'Ethereum', subgraphId: 'AwoxEZbiWLvv6e3QdvdMZw4WDURdGbvPfHmZRc8Dpfz9', schema: 'messari-standardized' },
+  { protocol: 'Compound v3', chain: 'Arbitrum', subgraphId: '5MjRndNWGhqvNX7chUYLQDnvEgc8DaH8eisEkcJt71SR', schema: 'messari-standardized' },
 
-    // ── Morpho Blue (official deployments, discovered via Subgraph MCP) ──
-    // Ethereum: top market USDT/USDT ~$17M TVL; long dust tail filtered by MIN_TVL_USD.
-    { protocol: 'Morpho Blue', chain: 'Ethereum', subgraphId: '8Lz789DP5VKLXumTMTgygjU2xtuzx8AhbaacgN5PYCAs', schema: 'messari-standardized' },
-    // Arbitrum: healthy deployment; no markets above the TVL floor yet.
-    { protocol: 'Morpho Blue', chain: 'Arbitrum', subgraphId: 'XsJn88DNCHJ1kgTqYeTgHMQSK4LuG1LR75339QVeQ26', schema: 'messari-standardized' },
-    // Base: query-compatible, but currently returns $0 TVL on all rows — the
-    // $1M floor naturally excludes it without breaking execution. Also note:
-    // the MCP keyword "morpho blue" returns 0 results (hyphenated names); use
-    // the GraphMcpClient multi-keyword retry ("morpho", "morpho-blue").
-    { protocol: 'Morpho Blue', chain: 'Base', subgraphId: '71ZTy1veF9twER9CLMnPWeLQ7GZcwKsjmygejrgKirqs', schema: 'messari-standardized' },
-  ];
+  // ── Morpho Blue ──────────────────────────────────────────────────────
+  { protocol: 'Morpho Blue', chain: 'Ethereum', subgraphId: '8Lz789DP5VKLXumTMTgygjU2xtuzx8AhbaacgN5PYCAs', schema: 'messari-standardized' },
+  { protocol: 'Morpho Blue', chain: 'Arbitrum', subgraphId: 'XsJn88DNCHJ1kgTqYeTgHMQSK4LuG1LR75339QVeQ26', schema: 'messari-standardized' },
+
+  // ── Spark Protocol (SparkLend) ───────────────────────────────────────
+  { protocol: 'Spark', chain: 'Ethereum', subgraphId: 'GbKdmBe4ycCYCQLQSjqGg6UHYoYfbyJyq5WrG35pv1si', schema: 'messari-standardized' },
+];
   // Unified Messari pattern, hardened against the duplicate-market and dust bugs:
   //   - `isActive: true` — excludes paused/frozen markets (e.g. Aave Arbitrum
   //     bridged USDC.e, which is active=false and previously leaked into
@@ -92,32 +89,6 @@
           rate
           side
           type
-        }
-      }
-    }
-  `;
-
-  // Uniswap v3 Ethereum (substreams deployment, Messari DEX AMM schema 4.x):
-  // stable pools for comparative LP yield, with hourly supply-side fee revenue
-  // snapshots used to annualize an estimated APY.
-  export const UNISWAP_V3_ETHEREUM_SUBGRAPH_ID =
-      "4cKy6QQMc5tpfdx8yxfYeb9TLZmgLQe44ddW1G7NwkA6";
-
-  export const UNISWAP_TOP_STABLE_POOLS_QUERY = `
-    query TopStablePools {
-      liquidityPools(
-        first: 6
-        orderBy: totalValueLockedUSD
-        orderDirection: desc
-        where: { inputTokens_: { symbol_in: ["USDC", "USDT", "DAI"] } }
-      ) {
-        name
-        inputTokens { symbol }
-        fees { feeType feePercentage }
-        totalValueLockedUSD
-        hourlySnapshots(first: 24, orderBy: hour, orderDirection: desc) {
-          hourlySupplySideRevenueUSD
-          totalValueLockedUSD
         }
       }
     }

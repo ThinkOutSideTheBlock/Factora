@@ -2,16 +2,13 @@ import {
   MultiAssetBenchmarkReport,
   AssetBenchmark,
   ProtocolMarketRate,
-  LpPoolBenchmark,
+  GraphFeedError,
 } from './graph-feed.types.js';
 import {
   LENDING_SUBGRAPHS,
   MESSARI_MULTI_ASSET_QUERY,
   MIN_TVL_USD,
-  UNISWAP_V3_ETHEREUM_SUBGRAPH_ID,
-  UNISWAP_TOP_STABLE_POOLS_QUERY,
 } from './subgraphs.config.js';
-import { graphMcpClient } from './graph-mcp.client.js';
 
 interface MessariRate {
   rate: string;
@@ -27,17 +24,6 @@ interface MessariMarket {
   rates: MessariRate[];
 }
 
-interface UniswapPool {
-  name: string | null;
-  inputTokens?: Array<{ symbol: string }>;
-  fees?: Array<{ feeType: string; feePercentage: string }>;
-  totalValueLockedUSD: string;
-  hourlySnapshots?: Array<{
-    hourlySupplySideRevenueUSD: string;
-    totalValueLockedUSD: string;
-  }>;
-}
-
 const ASSET_SYMBOLS = ['USDC', 'USDT', 'DAI'] as const;
 const ASSET_ALIASES: Record<string, (typeof ASSET_SYMBOLS)[number]> = {
   USDC: 'USDC',
@@ -46,33 +32,6 @@ const ASSET_ALIASES: Record<string, (typeof ASSET_SYMBOLS)[number]> = {
   USDCN: 'USDC',
   USDT: 'USDT',
   DAI: 'DAI',
-};
-
-const FALLBACK_BENCHMARKS: Record<string, AssetBenchmark> = {
-  USDC: {
-    symbol: 'USDC',
-    averageSupplyApy: 0.048,
-    maxSupplyApy: 0.052,
-    minSupplyApy: 0.044,
-    topMarket: 'Aave v3 (Ethereum)',
-    marketsCount: 2,
-  },
-  USDT: {
-    symbol: 'USDT',
-    averageSupplyApy: 0.051,
-    maxSupplyApy: 0.055,
-    minSupplyApy: 0.047,
-    topMarket: 'Compound v3 (Ethereum)',
-    marketsCount: 2,
-  },
-  DAI: {
-    symbol: 'DAI',
-    averageSupplyApy: 0.062,
-    maxSupplyApy: 0.065,
-    minSupplyApy: 0.058,
-    topMarket: 'Aave v3 (Ethereum)',
-    marketsCount: 2,
-  },
 };
 
 const TARGET_TIMEOUT_MS = 30_000;
@@ -91,6 +50,7 @@ export class GraphFeedService {
    * subgraph. No internal caching; the caller decides freshness policy.
    */
   async getStandardizedLendingBenchmarks(): Promise<MultiAssetBenchmarkReport> {
+    const candidateErrors: { target: string; error: string }[] = [];
     const rawRates: ProtocolMarketRate[] = [];
 
     const fetches = LENDING_SUBGRAPHS.map(async (target) => {
@@ -100,10 +60,29 @@ export class GraphFeedService {
       }
     });
 
-    await Promise.allSettled(fetches);
+    const settled = await Promise.allSettled(fetches);
+    for (let i = 0; i < settled.length; i += 1) {
+      const outcome = settled[i];
+      if (outcome.status === 'rejected') {
+        const target = LENDING_SUBGRAPHS[i];
+        candidateErrors.push({
+          target: `${target.protocol} on ${target.chain}`,
+          error:
+            outcome.reason instanceof Error
+              ? outcome.reason.message
+              : String(outcome.reason),
+        });
+      }
+    }
 
+    // STRICT DATA CONTRACT: no targets returned usable markets above the
+    // quality gates — this module never fabricates benchmark values.
     if (rawRates.length === 0) {
-      return this.getFallbackReport();
+      throw new GraphFeedError(
+        'ALL_TARGETS_FAILED',
+        'no Messari lending subgraph returned usable markets above the quality gates — refusing to fabricate benchmarks',
+        { candidateErrors },
+      );
     }
 
     // Q1/Q2 hardening: a single (protocol, chain, symbol) may still surface
@@ -111,42 +90,27 @@ export class GraphFeedService {
     // as active (e.g. USDCn vs USDC.e). Keep only the deepest-liquidity
     // market per key so benchmarks are never diluted.
     const rates = this.deduplicateByDeepestTvl(rawRates);
+    const benchmarks = this.aggregateBenchmarks(rates);
+
+    // STRICT DATA CONTRACT: every canonical underwriting stablecoin must be
+    // present in the live set; a missing asset is an error.
+    const missingAssets = ASSET_SYMBOLS.filter(
+      (symbol) => !benchmarks[symbol],
+    );
+    if (missingAssets.length > 0) {
+      throw new GraphFeedError(
+        'NO_LIVE_DATA',
+        `live markets returned but canonical assets are missing: ${missingAssets.join(', ')} — refusing to fabricate benchmarks`,
+        { missingAssets: [...missingAssets], candidateErrors },
+      );
+    }
 
     return {
       timestamp: Date.now(),
-      benchmarks: this.aggregateBenchmarks(rates),
+      benchmarks,
       detailedRates: rates,
       source: 'The Graph Decentralized Network (Messari Standardized)',
     };
-  }
-
-  /**
-   * Comparative DEX LP yields from live Uniswap v3 data via the Subgraph MCP
-   * singleton; falls back to static reference pools if MCP is offline.
-   */
-  async getDEXLiquidityYield(): Promise<LpPoolBenchmark[]> {
-    try {
-      const result = await graphMcpClient.queryDynamic(
-        UNISWAP_V3_ETHEREUM_SUBGRAPH_ID,
-        UNISWAP_TOP_STABLE_POOLS_QUERY,
-      );
-      const pools = (result?.data as { liquidityPools?: UniswapPool[] })
-        ?.liquidityPools;
-      const benchmarks: LpPoolBenchmark[] = [];
-      for (const pool of pools ?? []) {
-        const benchmark = this.toLpBenchmark(pool);
-        if (benchmark) benchmarks.push(benchmark);
-      }
-      if (benchmarks.length > 0) return benchmarks;
-      console.warn('[GraphFeed] MCP returned no usable LP pools, using fallback');
-      return this.getFallbackLpPools();
-    } catch (err) {
-      console.warn(
-        '[GraphFeed] DEX LP fetch failed, using fallback:',
-        err instanceof Error ? err.message : err,
-      );
-      return this.getFallbackLpPools();
-    }
   }
 
   /**
@@ -271,10 +235,10 @@ export class GraphFeedService {
   }
 
   /**
-   * Collapse duplicate (protocol, chain, symbol) rows, keeping the
-   * deepest-liquidity market. Native and bridged stablecoin variants (USDCn,
-   * USDC.e, USDbC) normalize to the same canonical symbol; on ties the first
-   * occurrence wins.
+   * A single (protocol, chain, canonical symbol) key must resolve to exactly
+   * one market: the deepest-liquidity live market. Native Circle USDC and a
+   * still-listed bridged variant (USDC.e) collapse to one row instead of a
+   * duplicate that dilutes the benchmark.
    */
   private deduplicateByDeepestTvl(
     rates: ProtocolMarketRate[],
@@ -282,101 +246,44 @@ export class GraphFeedService {
     const deepest = new Map<string, ProtocolMarketRate>();
     for (const rate of rates) {
       const key = `${rate.protocol}|${rate.chain}|${rate.symbol}`;
-      const incumbent = deepest.get(key);
-      if (!incumbent || rate.totalValueLockedUSD > incumbent.totalValueLockedUSD) {
+      const current = deepest.get(key);
+      if (!current || rate.totalValueLockedUSD > current.totalValueLockedUSD) {
         deepest.set(key, rate);
       }
     }
-    return [...deepest.values()];
+    return [...deepest.values()].sort(
+      (a, b) => b.totalValueLockedUSD - a.totalValueLockedUSD,
+    );
   }
 
   private aggregateBenchmarks(
-    rawRates: ProtocolMarketRate[],
+    rates: ProtocolMarketRate[],
   ): Record<string, AssetBenchmark> {
     const benchmarks: Record<string, AssetBenchmark> = {};
-    for (const sym of ASSET_SYMBOLS) {
-      const matching = rawRates.filter((r) => r.symbol === sym && r.supplyApy > 0);
-      if (matching.length === 0) {
-        benchmarks[sym] = { ...FALLBACK_BENCHMARKS[sym] };
-        continue;
-      }
-      const avg =
-        matching.reduce((acc, cur) => acc + cur.supplyApy, 0) / matching.length;
-      const sorted = [...matching].sort((a, b) => b.supplyApy - a.supplyApy);
-      benchmarks[sym] = {
-        symbol: sym,
-        averageSupplyApy: Number(avg.toFixed(4)),
-        maxSupplyApy: sorted[0].supplyApy,
-        minSupplyApy: sorted[sorted.length - 1].supplyApy,
-        topMarket: `${sorted[0].protocol} (${sorted[0].chain})`,
-        marketsCount: matching.length,
+    for (const symbol of ASSET_SYMBOLS) {
+      const markets = rates.filter(
+        (rate) => rate.symbol === symbol && rate.supplyApy > 0,
+      );
+      if (markets.length === 0) continue;
+      const averageSupplyApy =
+        markets.reduce((sum, m) => sum + m.supplyApy, 0) / markets.length;
+      const top = markets.reduce((best, m) =>
+        m.supplyApy > best.supplyApy ? m : best,
+      );
+      benchmarks[symbol] = {
+        symbol,
+        averageSupplyApy: Number(averageSupplyApy.toFixed(4)),
+        maxSupplyApy: Number(
+          Math.max(...markets.map((m) => m.supplyApy)).toFixed(4),
+        ),
+        minSupplyApy: Number(
+          Math.min(...markets.map((m) => m.supplyApy)).toFixed(4),
+        ),
+        topMarket: `${top.protocol} (${top.chain})`,
+        marketsCount: markets.length,
       };
     }
     return benchmarks;
-  }
-
-  private toLpBenchmark(pool: UniswapPool): LpPoolBenchmark | null {
-    const symbols = (pool.inputTokens ?? []).map((t) => t.symbol);
-    if (symbols.length !== 2) return null;
-
-    const tradingFee = Number(
-      pool.fees?.find((f) => f.feeType === 'FIXED_TRADING_FEE')?.feePercentage ?? NaN,
-    );
-    const snapshots = pool.hourlySnapshots ?? [];
-    if (!Number.isFinite(tradingFee) || snapshots.length < 2) return null;
-
-    // Annualize realized supply-side fee revenue over the snapshot window.
-    const hours = Math.min(snapshots.length, 24);
-    const window = snapshots.slice(0, hours);
-    const revenues = window.map((snapshot) =>
-      Number(snapshot.hourlySupplySideRevenueUSD),
-    );
-    const tvls = window.map((snapshot) => Number(snapshot.totalValueLockedUSD));
-    if (revenues.some((value) => !Number.isFinite(value)) || tvls.some((value) => !Number.isFinite(value))) {
-      return null;
-    }
-    const feeRevenue = revenues.reduce((acc, value) => acc + value, 0);
-    const avgTvl = tvls.reduce((acc, value) => acc + value, 0) / hours;
-    if (avgTvl <= 0) return null;
-
-    const annualized = (feeRevenue / hours) * 24 * 365 / avgTvl;
-    const tvlUsd = this.toFiniteNonNegativeNumber(pool.totalValueLockedUSD);
-    if (!Number.isFinite(annualized) || tvlUsd <= 0) return null;
-
-    return {
-      protocol: 'Uniswap v3',
-      pair: `${symbols[0]}/${symbols[1]} (${tradingFee}%)`,
-      estimatedApy: Number(annualized.toFixed(4)),
-      tvlUSD: tvlUsd,
-    };
-  }
-
-  private getFallbackLpPools(): LpPoolBenchmark[] {
-    return [
-      {
-        protocol: 'Uniswap v3 (Fallback)',
-        pair: 'USDC/USDT (0.01%)',
-        estimatedApy: 0.075,
-        tvlUSD: 50_000_000,
-      },
-      {
-        protocol: 'Uniswap v3 (Fallback)',
-        pair: 'USDC/WETH (0.05%)',
-        estimatedApy: 0.12,
-        tvlUSD: 250_000_000,
-      },
-    ];
-  }
-
-  private getFallbackReport(): MultiAssetBenchmarkReport {
-    return {
-      timestamp: Date.now(),
-      benchmarks: Object.fromEntries(
-        ASSET_SYMBOLS.map((symbol) => [symbol, { ...FALLBACK_BENCHMARKS[symbol] }]),
-      ),
-      detailedRates: [],
-      source: 'Deterministic Baseline Fallback',
-    };
   }
 
   private toFiniteNonNegativeNumber(value: string): number {

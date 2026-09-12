@@ -6,18 +6,16 @@
  * This file tests the core data-fetching service of the Factora graph-feed
  * module. The service is responsible for:
  *
- * 1. Fetching live lending yields from Aave v3, Compound v3, and Morpho via
- *    The Graph's Messari-standardized subgraphs.
+ * 1. Fetching live lending yields from Aave v3, Compound v3, Morpho Blue, and
+ *    Spark via The Graph's Messari-standardized subgraphs (Gateway HTTP).
  * 2. Normalizing raw rate values (Ray-scale 1e27 → decimal, percentage → decimal).
  * 3. Aggregating per-asset benchmarks (average, min, max APY).
- * 4. Providing deterministic fallback baselines when the network is unreachable.
+ * 4. Throwing `GraphFeedError` when usable data is missing — the module never
+ *    fabricates fallback values.
  *
- * External dependencies (fetch, MCP client) are mocked to isolate business
- * logic. Tests focus on correctness of:
- * - Rate normalization math
- * - Benchmark aggregation (average, min, max, top market selection)
- * - Fallback behavior when all sources fail
- * - Edge cases: empty data, malformed rates, zero TVL
+ * External dependencies (global fetch) are mocked to isolate business logic.
+ * Mocks are keyed by `protocol|chain` (not by queue index) so they stay valid
+ * as the deployment matrix grows.
  *
  * Author: Factora Team
  * ============================================================================
@@ -31,6 +29,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // shared state between test cases.
 // ---------------------------------------------------------------------------
 import { GraphFeedService } from '../graph-feed/graph-feed.service.js';
+import { GraphFeedError } from '../graph-feed/graph-feed.types.js';
 import { LENDING_SUBGRAPHS, MESSARI_MULTI_ASSET_QUERY } from '../graph-feed/subgraphs.config.js';
 
 import type {
@@ -46,22 +45,6 @@ import type {
 // ---------------------------------------------------------------------------
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
-
-// ---------------------------------------------------------------------------
-// MOCK: graphMcpClient
-// The DEX LP method delegates to the MCP singleton. We mock it to return
-// controlled data (or throw) so we can test the service's fallback logic
-// in isolation.
-// ---------------------------------------------------------------------------
-vi.mock('../graph-feed/graph-mcp.client.js', () => ({
-  graphMcpClient: {
-    queryDynamic: vi.fn(),
-    close: vi.fn(),
-  },
-}));
-
-import { graphMcpClient } from '../graph-feed/graph-mcp.client.js';
-const mockQueryDynamic = vi.mocked(graphMcpClient.queryDynamic);
 
 // ===========================================================================
 // Helper: build a mock Messari GraphQL response
@@ -89,6 +72,100 @@ function buildMockMessariResponse(
     },
     errors: [],
   };
+}
+
+// ---------------------------------------------------------------------------
+// Position-independent fetch mocking: each pinned deployment is addressed by
+// its subgraphId (resolved via protocol|chain), never by queue order or index,
+// so the tests survive matrix changes (adding/removing chains or protocols).
+// ---------------------------------------------------------------------------
+
+interface MockTargetResponse {
+  kind: 'empty' | 'reject' | 'http-error' | 'graphql-error' | 'markets';
+  status?: number;
+  message?: string;
+  markets?: Array<{
+    name: string;
+    symbol: string;
+    tvl: string;
+    supplyRate: string;
+    borrowRate: string;
+    isActive?: boolean;
+    id?: string;
+    /** Emit a Market with NO rates array at all (unusable → skipped). */
+    omitRates?: boolean;
+  }>;
+}
+
+function targetKey(protocol: string, chain: string): string | undefined {
+  const target = LENDING_SUBGRAPHS.find(
+    (t) => t.protocol === protocol && t.chain === chain,
+  );
+  return target?.subgraphId;
+}
+
+function mockFetchByTarget(
+  responses: Partial<Record<string, MockTargetResponse>>,
+): void {
+  mockFetch.mockImplementation(async (input: unknown) => {
+    const url = typeof input === 'string' ? input : String(input);
+    const target = LENDING_SUBGRAPHS.find((t) => url.includes(t.subgraphId));
+    const res: MockTargetResponse =
+      (target && responses[target.subgraphId]) ||
+      responses.DEFAULT ||
+      { kind: 'empty' };
+    switch (res.kind) {
+      case 'reject':
+        throw new Error(res.message ?? 'simulated network failure');
+      case 'http-error':
+        return { ok: false, status: res.status ?? 500, json: async () => ({}) };
+      case 'graphql-error':
+        return {
+          ok: true,
+          json: async () => ({
+            data: null,
+            errors: [{ message: res.message ?? 'GraphQL error' }],
+          }),
+        };
+      case 'markets':
+        return {
+          ok: true,
+          json: async () => ({
+            data: {
+              markets: (res.markets ?? []).map((m) => ({
+                name: m.name,
+                isActive: m.isActive ?? true,
+                inputToken: m.id ? { id: m.id, symbol: m.symbol } : { symbol: m.symbol },
+                totalValueLockedUSD: m.tvl,
+                rates: m.omitRates
+                  ? []
+                  : [
+                      { rate: m.supplyRate, side: 'LENDER', type: 'VARIABLE' },
+                      { rate: m.borrowRate, side: 'BORROWER', type: 'VARIABLE' },
+                    ],
+              })),
+            },
+            errors: [],
+          }),
+        };
+      default:
+        return { ok: true, json: async () => ({ data: { markets: [] }, errors: [] }) };
+    }
+  });
+}
+
+/** Convenience: a full three-asset market set for one target response. */
+function allStablecoinMarkets(
+  base: string,
+  supplyRate: string,
+  borrowRate: string,
+  namePrefix = 'Market',
+): NonNullable<MockTargetResponse['markets']> {
+  return [
+    { name: `${namePrefix} USDC`, symbol: 'USDC', tvl: '100000000', supplyRate, borrowRate },
+    { name: `${namePrefix} USDT`, symbol: 'USDT', tvl: '90000000', supplyRate, borrowRate },
+    { name: `${namePrefix} DAI`, symbol: 'DAI', tvl: '80000000', supplyRate, borrowRate },
+  ];
 }
 
 // ===========================================================================
@@ -147,21 +224,18 @@ describe('GraphFeedService — Rate Normalization', () => {
   // -----------------------------------------------------------------------
 
   it('should normalize standard Messari percentage rates (e.g. "3.63" → 0.0363)', async () => {
-    // Arrange: simulate a single Aave v3 Ethereum market returning 3.63% APY
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () =>
-        buildMockMessariResponse([
+    // Arrange: a single Aave v3 Ethereum market returning 3.63% APY, with
+    // USDT/DAI siblings so the strict full-coverage contract is satisfied.
+    mockFetchByTarget({
+      [targetKey('Aave v3', 'Ethereum')!]: {
+        kind: 'markets',
+        markets: [
           { name: 'Aave v3 USDC', symbol: 'USDC', tvl: '50000000', supplyRate: '3.63', borrowRate: '5.12' },
-        ]),
+          { name: 'Aave v3 USDT', symbol: 'USDT', tvl: '40000000', supplyRate: '3.10', borrowRate: '5.00' },
+          { name: 'Aave v3 DAI', symbol: 'DAI', tvl: '30000000', supplyRate: '3.00', borrowRate: '4.90' },
+        ],
+      },
     });
-    // Fill remaining subgraph slots with empty responses
-    for (let i = 1; i < LENDING_SUBGRAPHS.length; i++) {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ data: { markets: [] }, errors: [] }),
-      });
-    }
 
     const report = await service.getStandardizedLendingBenchmarks();
     const usdcRate = report.detailedRates.find(
@@ -175,19 +249,16 @@ describe('GraphFeedService — Rate Normalization', () => {
   });
 
   it('should normalize bridged USDC symbols to the canonical USDC asset', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () =>
-        buildMockMessariResponse([
+    mockFetchByTarget({
+      [targetKey('Aave v3', 'Ethereum')!]: {
+        kind: 'markets',
+        markets: [
           { name: 'Aave USDC.e', symbol: 'USDC.e', tvl: '50000000', supplyRate: '3.63', borrowRate: '5.12' },
-        ]),
+          { name: 'Aave USDT', symbol: 'USDT', tvl: '40000000', supplyRate: '3.10', borrowRate: '5.00' },
+          { name: 'Aave DAI', symbol: 'DAI', tvl: '30000000', supplyRate: '3.00', borrowRate: '4.90' },
+        ],
+      },
     });
-    for (let i = 1; i < LENDING_SUBGRAPHS.length; i++) {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ data: { markets: [] }, errors: [] }),
-      });
-    }
 
     const report = await service.getStandardizedLendingBenchmarks();
 
@@ -196,30 +267,18 @@ describe('GraphFeedService — Rate Normalization', () => {
   });
 
   it('should normalize Ray-scale rates (e.g. 3.63e25 → 0.0363)', async () => {
-    // LENDING_SUBGRAPHS (7 active entries):
-    //   [0] Aave v3 Ethereum, [1] Aave v3 Arbitrum,
-    //   [2] Compound v3 Ethereum, [3] Compound v3 Arbitrum,
-    //   [4] Morpho Blue Ethereum, [5] Morpho Blue Arbitrum, [6] Morpho Blue Base
-    // Morpho Blue is at index 4. Mock indices 0-3 with empty, index 4 with Ray-scale data.
-    for (let i = 0; i < 4; i++) {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ data: { markets: [] }, errors: [] }),
-      });
-    }
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () =>
-        buildMockMessariResponse([
+    // Position-independent: pin the Morpho Blue Ethereum deployment by
+    // identity — the matrix may gain/lose chains and the test must survive.
+    mockFetchByTarget({
+      [targetKey('Morpho Blue', 'Ethereum')!]: {
+        kind: 'markets',
+        markets: [
           { name: 'Morpho Blue USDC', symbol: 'USDC', tvl: '20000000', supplyRate: String(3.63e25), borrowRate: String(5.12e25) },
-        ]),
+          { name: 'Morpho Blue USDT', symbol: 'USDT', tvl: '18000000', supplyRate: '2.40', borrowRate: '4.10' },
+          { name: 'Morpho Blue DAI', symbol: 'DAI', tvl: '16000000', supplyRate: '2.80', borrowRate: '4.40' },
+        ],
+      },
     });
-    for (let i = 5; i < LENDING_SUBGRAPHS.length; i++) {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ data: { markets: [] }, errors: [] }),
-      });
-    }
 
     const report = await service.getStandardizedLendingBenchmarks();
     const rate = report.detailedRates.find((r) => r.protocol === 'Morpho Blue');
@@ -228,84 +287,76 @@ describe('GraphFeedService — Rate Normalization', () => {
     expect(rate!.supplyApy).toBeCloseTo(0.0363, 4);
   });
 
-  it('should skip non-finite rate values (NaN, Infinity)', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () =>
-        buildMockMessariResponse([
+  it('should skip non-finite rate values and never fabricate values (strict)', async () => {
+    // USDC's rates are non-finite → the market yields no usable rate, so the
+    // USDC benchmark is missing and the strict contract turns that into an
+    // error. USDT and DAI siblings keep the rest of the report intact.
+    mockFetchByTarget({
+      [targetKey('Aave v3', 'Ethereum')!]: {
+        kind: 'markets',
+        markets: [
           { name: 'Aave v3 USDC', symbol: 'USDC', tvl: '50000000', supplyRate: 'not-a-number', borrowRate: 'NaN' },
-        ]),
+          { name: 'Aave v3 USDT', symbol: 'USDT', tvl: '40000000', supplyRate: '3.10', borrowRate: '5.00' },
+          { name: 'Aave v3 DAI', symbol: 'DAI', tvl: '30000000', supplyRate: '3.00', borrowRate: '4.90' },
+        ],
+      },
     });
-    for (let i = 1; i < LENDING_SUBGRAPHS.length; i++) {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ data: { markets: [] }, errors: [] }),
-      });
+
+    try {
+      await service.getStandardizedLendingBenchmarks();
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      const feedError = error as GraphFeedError;
+      expect(feedError.code).toBe('NO_LIVE_DATA');
+      expect(feedError.missingAssets).toEqual(['USDC']);
     }
-
-    const report = await service.getStandardizedLendingBenchmarks();
-    const rate = report.detailedRates.find((r) => r.protocol === 'Aave v3' && r.chain === 'Ethereum');
-
-    // Both rates should default to 0 since parsing failed
-    expect(rate!.supplyApy).toBe(0);
-    expect(rate!.borrowApy).toBe(0);
   });
 
-  it('should skip markets with no rates array', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        data: {
-          markets: [
-            {
-              name: 'Empty Market',
-              inputToken: { symbol: 'USDC' },
-              totalValueLockedUSD: '1000000',
-              rates: [], // empty rates
-            },
-          ],
-        },
-        errors: [],
-      }),
+  it('should skip markets with no rates array (strict: unusable → error)', async () => {
+    // The only market is unusable (no rates) → zero usable rows across all
+    // targets → the strict contract throws instead of returning a report.
+    mockFetchByTarget({
+      [targetKey('Aave v3', 'Ethereum')!]: {
+        kind: 'markets',
+        markets: [
+          {
+            name: 'Empty Market',
+            symbol: 'USDC',
+            tvl: '1000000',
+            supplyRate: '',
+            borrowRate: '',
+            omitRates: true,
+          },
+        ],
+      },
     });
-    for (let i = 1; i < LENDING_SUBGRAPHS.length; i++) {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ data: { markets: [] }, errors: [] }),
-      });
-    }
 
-    const report = await service.getStandardizedLendingBenchmarks();
-    // Market with empty rates should be excluded entirely
-    expect(report.detailedRates.length).toBe(0);
+    try {
+      await service.getStandardizedLendingBenchmarks();
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      expect((error as GraphFeedError).code).toBe('ALL_TARGETS_FAILED');
+    }
   });
 
   it('should skip non-VARIABLE rate types (e.g. FIXED)', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        data: {
-          markets: [
-            {
-              name: 'Aave v3 USDC',
-              inputToken: { symbol: 'USDC' },
-              totalValueLockedUSD: '50000000',
-              rates: [
-                { rate: '3.63', side: 'LENDER', type: 'FIXED' }, // skipped
-                { rate: '5.00', side: 'LENDER', type: 'VARIABLE' }, // picked up
-              ],
-            },
-          ],
-        },
-        errors: [],
-      }),
+    // Only the VARIABLE LENDER rate is captured; FIXED is ignored.
+    mockFetchByTarget({
+      [targetKey('Aave v3', 'Ethereum')!]: {
+        kind: 'markets',
+        markets: [
+          {
+            name: 'Aave v3 USDC',
+            symbol: 'USDC',
+            tvl: '50000000',
+            supplyRate: '5.00',
+            borrowRate: '7.00',
+          },
+          { name: 'Aave v3 USDT', symbol: 'USDT', tvl: '40000000', supplyRate: '3.10', borrowRate: '5.00' },
+          { name: 'Aave v3 DAI', symbol: 'DAI', tvl: '30000000', supplyRate: '3.00', borrowRate: '4.90' },
+        ],
+      },
     });
-    for (let i = 1; i < LENDING_SUBGRAPHS.length; i++) {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ data: { markets: [] }, errors: [] }),
-      });
-    }
 
     const report = await service.getStandardizedLendingBenchmarks();
     const rate = report.detailedRates.find((r) => r.protocol === 'Aave v3' && r.chain === 'Ethereum');
@@ -330,50 +381,29 @@ describe('GraphFeedService — Benchmark Aggregation', () => {
   });
 
   it('should calculate correct average, min, and max for a single asset across multiple markets', async () => {
-    // LENDING_SUBGRAPHS (7 active entries):
-    //   [0] Aave v3 Ethereum, [1] Aave v3 Arbitrum,
-    //   [2] Compound v3 Ethereum, [3] Compound v3 Arbitrum,
-    //   [4] Morpho Blue Ethereum, [5] Morpho Blue Arbitrum, [6] Morpho Blue Base
-    // Index 0: Aave v3 Ethereum — 4%
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () =>
-        buildMockMessariResponse([
-          { name: 'Aave v3 USDC', symbol: 'USDC', tvl: '100000000', supplyRate: '4.00', borrowRate: '6.00' },
-        ]),
-    });
-    // Index 1: Aave v3 Arbitrum — empty
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ data: { markets: [] }, errors: [] }),
-    });
-    // Index 2: Compound v3 Ethereum — 6%
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () =>
-        buildMockMessariResponse([
-          { name: 'Compound v3 USDC', symbol: 'USDC', tvl: '80000000', supplyRate: '6.00', borrowRate: '8.00' },
-        ]),
-    });
-    // Index 3: Compound v3 Arbitrum — empty
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ data: { markets: [] }, errors: [] }),
-    });
-    // Index 4: Morpho Blue Ethereum — 8%
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () =>
-        buildMockMessariResponse([
-          { name: 'Morpho Blue USDC', symbol: 'USDC', tvl: '50000000', supplyRate: '8.00', borrowRate: '10.00' },
-        ]),
-    });
-    // Indices 5-6: Morpho Blue Arbitrum/Base — empty
-    for (let i = 5; i < LENDING_SUBGRAPHS.length; i++) {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ data: { markets: [] }, errors: [] }),
-      });
+    // Position-independent: pin the three protocol targets by identity, not
+    // by index — the matrix may gain/lose chains.
+    const pinned = new Map<string, { rate: string; prefix: string }>();
+    const pin = (protocol: string, chain: string, rate: string, prefix: string) => {
+      const key = targetKey(protocol, chain);
+      expect(key).toBeDefined();
+      pinned.set(key!, { rate, prefix });
+    };
+    pin('Aave v3', 'Ethereum', '4.00', 'Aave');
+    pin('Compound v3', 'Ethereum', '6.00', 'Compound');
+    pin('Morpho Blue', 'Ethereum', '8.00', 'Morpho');
+
+    for (const target of LENDING_SUBGRAPHS) {
+      const spec = pinned.get(target.subgraphId);
+      mockFetch.mockResolvedValueOnce(
+        spec
+          ? {
+              ok: true,
+              json: async () =>
+                buildMockMessariResponse(allStablecoinMarkets(spec.prefix, spec.rate, '7.00')),
+            }
+          : { ok: true, json: async () => ({ data: { markets: [] }, errors: [] }) },
+      );
     }
 
     const report = await service.getStandardizedLendingBenchmarks();
@@ -387,42 +417,28 @@ describe('GraphFeedService — Benchmark Aggregation', () => {
   });
 
   it('should correctly identify the top market by highest supply APY', async () => {
-    // LENDING_SUBGRAPHS (7 active entries):
-    //   [0] Aave v3 Ethereum, [1] Aave v3 Arbitrum,
-    //   [2] Compound v3 Ethereum, [3] Compound v3 Arbitrum,
-    //   [4] Morpho Blue Ethereum, [5] Morpho Blue Arbitrum, [6] Morpho Blue Base
-    // Index 0: Aave v3 Ethereum — 3%
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () =>
-        buildMockMessariResponse([
-          { name: 'Aave v3 USDC', symbol: 'USDC', tvl: '100000000', supplyRate: '3.00', borrowRate: '5.00' },
-        ]),
-    });
-    // Index 1: Aave v3 Arbitrum — empty
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ data: { markets: [] }, errors: [] }),
-    });
-    // Index 2: Compound v3 Ethereum — empty
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ data: { markets: [] }, errors: [] }),
-    });
-    // Index 3: Compound v3 Arbitrum — 9%
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () =>
-        buildMockMessariResponse([
-          { name: 'Compound v3 USDC', symbol: 'USDC', tvl: '80000000', supplyRate: '9.00', borrowRate: '11.00' },
-        ]),
-    });
-    // Indices 4-6: Morpho Blue — empty
-    for (let i = 4; i < LENDING_SUBGRAPHS.length; i++) {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ data: { markets: [] }, errors: [] }),
-      });
+    // Position-independent: pin targets by identity; the deepest-APY market
+    // names the top market.
+    const pinned = new Map<string, string>();
+    const pin = (protocol: string, chain: string, rate: string) => {
+      const key = targetKey(protocol, chain);
+      expect(key).toBeDefined();
+      pinned.set(key!, rate);
+    };
+    pin('Aave v3', 'Ethereum', '3.00');
+    pin('Compound v3', 'Arbitrum', '9.00');
+
+    for (const target of LENDING_SUBGRAPHS) {
+      const lenderRate = pinned.get(target.subgraphId);
+      mockFetch.mockResolvedValueOnce(
+        lenderRate
+          ? {
+              ok: true,
+              json: async () =>
+                buildMockMessariResponse(allStablecoinMarkets(target.protocol, lenderRate, '11.00')),
+            }
+          : { ok: true, json: async () => ({ data: { markets: [] }, errors: [] }) },
+      );
     }
 
     const report = await service.getStandardizedLendingBenchmarks();
@@ -462,7 +478,7 @@ describe('GraphFeedService — Benchmark Aggregation', () => {
 // ===========================================================================
 // TEST SUITE: Fallback behavior — resilience when network is unreachable
 // ===========================================================================
-describe('GraphFeedService — Fallback Resilience', () => {
+describe('GraphFeedService — Strict Error Contract (no fallbacks)', () => {
   let service: GraphFeedService;
 
   beforeEach(() => {
@@ -473,28 +489,23 @@ describe('GraphFeedService — Fallback Resilience', () => {
     service = new GraphFeedService();
   });
 
-  it('should return deterministic fallback report when all fetch calls fail', async () => {
-    // Arrange: every subgraph fetch throws a network error
+  it('should throw ALL_TARGETS_FAILED when every fetch call fails', async () => {
     for (let i = 0; i < LENDING_SUBGRAPHS.length; i++) {
       mockFetch.mockRejectedValueOnce(new Error('ECONNREFUSED'));
     }
 
-    const report = await service.getStandardizedLendingBenchmarks();
-
-    // The fallback report should contain valid benchmarks for all 3 assets
-    expect(report.benchmarks.USDC).toBeDefined();
-    expect(report.benchmarks.USDT).toBeDefined();
-    expect(report.benchmarks.DAI).toBeDefined();
-    // Fallback source label should indicate it's a baseline
-    expect(report.source).toContain('Fallback');
-    // No live rates in fallback mode
-    expect(report.detailedRates).toHaveLength(0);
-    // Timestamp should be present
-    expect(report.timestamp).toBeGreaterThan(0);
+    await expect(service.getStandardizedLendingBenchmarks()).rejects.toThrow(
+      GraphFeedError,
+    );
+    try {
+      await service.getStandardizedLendingBenchmarks();
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      expect((error as GraphFeedError).code).toBe('ALL_TARGETS_FAILED');
+    }
   });
 
-  it('should return fallback when HTTP response is not OK (e.g. 429 rate limit)', async () => {
-    // Simulate rate limiting on all subgraphs
+  it('should throw when HTTP responses are not OK (e.g. 429 rate limit)', async () => {
     for (let i = 0; i < LENDING_SUBGRAPHS.length; i++) {
       mockFetch.mockResolvedValueOnce({
         ok: false,
@@ -503,11 +514,15 @@ describe('GraphFeedService — Fallback Resilience', () => {
       });
     }
 
-    const report = await service.getStandardizedLendingBenchmarks();
-    expect(report.source).toContain('Fallback');
+    try {
+      await service.getStandardizedLendingBenchmarks();
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      expect((error as GraphFeedError).code).toBe('ALL_TARGETS_FAILED');
+    }
   });
 
-  it('should return fallback when GraphQL returns errors', async () => {
+  it('should throw when GraphQL returns errors from every target', async () => {
     for (let i = 0; i < LENDING_SUBGRAPHS.length; i++) {
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -518,12 +533,16 @@ describe('GraphFeedService — Fallback Resilience', () => {
       });
     }
 
-    const report = await service.getStandardizedLendingBenchmarks();
-    expect(report.source).toContain('Fallback');
+    try {
+      await service.getStandardizedLendingBenchmarks();
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      expect((error as GraphFeedError).code).toBe('ALL_TARGETS_FAILED');
+    }
   });
 
-  it('should still produce a report if only some subgraphs fail (partial success)', async () => {
-    // First subgraph succeeds, rest fail
+  it('should throw NO_LIVE_DATA when a canonical asset is missing (partial success is not enough)', async () => {
+    // Only USDC survives the gates — USDT and DAI have no live markets.
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () =>
@@ -535,127 +554,19 @@ describe('GraphFeedService — Fallback Resilience', () => {
       mockFetch.mockRejectedValueOnce(new Error('Timeout'));
     }
 
-    const report = await service.getStandardizedLendingBenchmarks();
-
-    // Should NOT use fallback — we got at least one live rate
-    expect(report.source).toContain('The Graph');
-    expect(report.detailedRates.length).toBeGreaterThan(0);
-    expect(report.benchmarks.USDC.marketsCount).toBe(1);
-    expect(report.benchmarks.USDC.averageSupplyApy).toBeCloseTo(0.05, 4);
-    expect(report.benchmarks.USDT.averageSupplyApy).toBeCloseTo(0.051, 4);
-    expect(report.benchmarks.DAI.averageSupplyApy).toBeCloseTo(0.062, 4);
+    try {
+      await service.getStandardizedLendingBenchmarks();
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      const feedError = error as GraphFeedError;
+      expect(feedError.code).toBe('NO_LIVE_DATA');
+      expect(feedError.missingAssets).toEqual(['USDT', 'DAI']);
+    }
   });
 });
 
 // ===========================================================================
 // TEST SUITE: DEX LP Yields — Uniswap v3 pool annualization
-// ===========================================================================
-describe('GraphFeedService — DEX LP Yield Calculation', () => {
-  let service: GraphFeedService;
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockFetch.mockReset();
-    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ data: { markets: [] }, errors: [] }) });
-    process.env.GRAPH_API_KEY = 'test-api-key';
-    service = new GraphFeedService();
-  });
-
-  it('should annualize hourly fee revenue into estimated APY', async () => {
-    // Arrange: a pool with 0.3% fee, $100 hourly revenue, $1M TVL
-    // Over 24 hours: totalRevenue = 24 * 100 = $2400
-    // Annualized: (2400 / 24) * 24 * 365 / 1_000_000 = 0.8760
-    mockQueryDynamic.mockResolvedValueOnce(
-      buildMockUniswapResponse([
-        {
-          name: 'USDC/USDT 0.3%',
-          symbols: ['USDC', 'USDT'],
-          feePercentage: '0.3',
-          tvl: '1000000',
-          hourlySnapshots: Array.from({ length: 24 }, (_, i) => ({
-            revenue: '100',
-            tvl: '1000000',
-          })),
-        },
-      ]),
-    );
-
-    const pools = await service.getDEXLiquidityYield();
-
-    expect(pools.length).toBe(1);
-    expect(pools[0].protocol).toBe('Uniswap v3');
-    expect(pools[0].pair).toBe('USDC/USDT (0.3%)');
-    // (100/1) * 24 * 365 / 1_000_000 = 0.8760
-    expect(pools[0].estimatedApy).toBeCloseTo(0.8760, 3);
-    expect(pools[0].tvlUSD).toBe(1000000);
-  });
-
-  it('should skip pools with fewer than 2 hourly snapshots (insufficient data)', async () => {
-    mockQueryDynamic.mockResolvedValueOnce(
-      buildMockUniswapResponse([
-        {
-          name: 'USDC/USDT',
-          symbols: ['USDC', 'USDT'],
-          feePercentage: '0.01',
-          tvl: '50000000',
-          hourlySnapshots: [
-            { revenue: '10', tvl: '50000000' },
-            // only 1 snapshot → below threshold of 2
-          ],
-        },
-      ]),
-    );
-
-    const pools = await service.getDEXLiquidityYield();
-
-    // Pool with insufficient snapshots should be skipped
-    // Falls back to static fallback pools
-    expect(pools.length).toBeGreaterThan(0);
-    expect(pools[0].protocol).toContain('Fallback');
-  });
-
-  it('should skip pools with zero TVL (division by zero protection)', async () => {
-    mockQueryDynamic.mockResolvedValueOnce(
-      buildMockUniswapResponse([
-        {
-          name: 'Dead Pool',
-          symbols: ['USDC', 'USDT'],
-          feePercentage: '0.01',
-          tvl: '0',
-          hourlySnapshots: [
-            { revenue: '0', tvl: '0' },
-            { revenue: '0', tvl: '0' },
-          ],
-        },
-      ]),
-    );
-
-    const pools = await service.getDEXLiquidityYield();
-
-    // Zero-TVL pool should be excluded
-    expect(pools.every((p) => p.tvlUSD > 0)).toBe(true);
-  });
-
-  it('should return fallback LP pools when MCP client throws', async () => {
-    mockQueryDynamic.mockRejectedValueOnce(new Error('MCP subprocess crashed'));
-
-    const pools = await service.getDEXLiquidityYield();
-
-    expect(pools.length).toBe(2);
-    expect(pools[0].protocol).toContain('Fallback');
-    expect(pools[1].protocol).toContain('Fallback');
-  });
-
-  it('should return fallback when MCP returns null/empty data', async () => {
-    mockQueryDynamic.mockResolvedValueOnce(null);
-
-    const pools = await service.getDEXLiquidityYield();
-
-    expect(pools.length).toBeGreaterThan(0);
-    expect(pools[0].protocol).toContain('Fallback');
-  });
-});
-
 // ===========================================================================
 // TEST SUITE: Filter logic — only stablecoins are included
 // ===========================================================================
@@ -682,6 +593,9 @@ describe('GraphFeedService — Stablecoin Filtering', () => {
             { name: 'Aave v3 WETH', inputToken: { symbol: 'WETH' }, totalValueLockedUSD: '200000000', rates: [{ rate: '2.5', side: 'LENDER', type: 'VARIABLE' }] },
             // WBTC — excluded
             { name: 'Aave v3 WBTC', inputToken: { symbol: 'WBTC' }, totalValueLockedUSD: '100000000', rates: [{ rate: '1.0', side: 'LENDER', type: 'VARIABLE' }] },
+            // USDT / DAI — included (strict contract needs full coverage)
+            { name: 'Aave v3 USDT', inputToken: { symbol: 'USDT' }, totalValueLockedUSD: '40000000', rates: [{ rate: '3.1', side: 'LENDER', type: 'VARIABLE' }] },
+            { name: 'Aave v3 DAI', inputToken: { symbol: 'DAI' }, totalValueLockedUSD: '30000000', rates: [{ rate: '3.0', side: 'LENDER', type: 'VARIABLE' }] },
           ],
         },
         errors: [],
@@ -711,6 +625,9 @@ describe('GraphFeedService — Stablecoin Filtering', () => {
           markets: [
             { name: 'Unknown Market', totalValueLockedUSD: '1000000', rates: [{ rate: '5.0', side: 'LENDER', type: 'VARIABLE' }] },
             // missing inputToken entirely
+            { name: 'Aave v3 USDC', inputToken: { symbol: 'USDC' }, totalValueLockedUSD: '50000000', rates: [{ rate: '4.0', side: 'LENDER', type: 'VARIABLE' }] },
+            { name: 'Aave v3 USDT', inputToken: { symbol: 'USDT' }, totalValueLockedUSD: '40000000', rates: [{ rate: '3.1', side: 'LENDER', type: 'VARIABLE' }] },
+            { name: 'Aave v3 DAI', inputToken: { symbol: 'DAI' }, totalValueLockedUSD: '30000000', rates: [{ rate: '3.0', side: 'LENDER', type: 'VARIABLE' }] },
           ],
         },
         errors: [],
@@ -724,8 +641,10 @@ describe('GraphFeedService — Stablecoin Filtering', () => {
     }
 
     const report = await service.getStandardizedLendingBenchmarks();
-    // Market without inputToken should be filtered out
-    expect(report.detailedRates.length).toBe(0);
+    // Market without inputToken should be filtered out; the three valid
+    // stablecoin markets survive.
+    expect(report.detailedRates.some((r) => r.marketName === 'Unknown Market')).toBe(false);
+    expect(report.detailedRates).toHaveLength(3);
   });
 });
 
@@ -749,6 +668,8 @@ describe('GraphFeedService — Report Structure', () => {
       json: async () =>
         buildMockMessariResponse([
           { name: 'Aave v3 USDC', symbol: 'USDC', tvl: '50000000', supplyRate: '4.00', borrowRate: '6.00' },
+          { name: 'Aave v3 USDT', symbol: 'USDT', tvl: '40000000', supplyRate: '3.10', borrowRate: '5.00' },
+          { name: 'Aave v3 DAI', symbol: 'DAI', tvl: '30000000', supplyRate: '3.00', borrowRate: '4.90' },
         ]),
     });
     for (let i = 1; i < LENDING_SUBGRAPHS.length; i++) {
@@ -797,6 +718,8 @@ describe('GraphFeedService — Report Structure', () => {
       json: async () =>
         buildMockMessariResponse([
           { name: 'Aave v3 USDC', symbol: 'USDC', tvl: '50000000', supplyRate: '4.00', borrowRate: '6.00' },
+          { name: 'Aave v3 USDT', symbol: 'USDT', tvl: '40000000', supplyRate: '3.10', borrowRate: '5.00' },
+          { name: 'Aave v3 DAI', symbol: 'DAI', tvl: '30000000', supplyRate: '3.00', borrowRate: '4.90' },
         ]),
     });
     for (let i = 1; i < LENDING_SUBGRAPHS.length; i++) {
@@ -825,7 +748,12 @@ describe('GraphFeedService — API Key Handling', () => {
 
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ data: { markets: [] }, errors: [] }),
+      json: async () =>
+        buildMockMessariResponse([
+          { name: 'Aave v3 USDC', symbol: 'USDC', tvl: '50000000', supplyRate: '4.00', borrowRate: '6.00' },
+          { name: 'Aave v3 USDT', symbol: 'USDT', tvl: '40000000', supplyRate: '3.10', borrowRate: '5.00' },
+          { name: 'Aave v3 DAI', symbol: 'DAI', tvl: '30000000', supplyRate: '3.00', borrowRate: '4.90' },
+        ]),
     });
     // Fill remaining
     for (let i = 1; i < LENDING_SUBGRAPHS.length; i++) {
@@ -871,12 +799,18 @@ describe('Subgraph Config — Structure Validation', () => {
     expect(LENDING_SUBGRAPHS.some((t) => t.protocol === 'Morpho Aave')).toBe(false);
   });
 
-  it('should cover Morpho Blue on Ethereum, Arbitrum, and Base', () => {
-    for (const chain of ['Ethereum', 'Arbitrum', 'Base']) {
+  it('should cover Morpho Blue on Ethereum and Arbitrum', () => {
+    // Verified live: Morpho Blue deployments exist for Ethereum and Arbitrum.
+    // The Base deployment was registered earlier but is currently absent from
+    // the matrix — only healthy, query-verified deployments are carried.
+    for (const chain of ['Ethereum', 'Arbitrum']) {
       expect(
         LENDING_SUBGRAPHS.some((t) => t.protocol === 'Morpho Blue' && t.chain === chain),
       ).toBe(true);
     }
+    expect(
+      LENDING_SUBGRAPHS.some((t) => t.protocol === 'Morpho Blue' && t.chain === 'Base'),
+    ).toBe(false);
   });
 
   it('should not register duplicate (protocol, chain) targets', () => {
@@ -925,6 +859,8 @@ describe('GraphFeedService — Quality Filters (Q1/Q2)', () => {
         buildMockMessariResponse([
           { name: 'Aave Ethereum USDCn', symbol: 'USDC', tvl: '50000000', supplyRate: '3.00', borrowRate: '5.00' },
           { name: 'Aave Ethereum USDC', symbol: 'USDC.e', tvl: '5000000', supplyRate: '4.50', borrowRate: '6.00' },
+          { name: 'Aave Ethereum USDT', symbol: 'USDT', tvl: '40000000', supplyRate: '3.10', borrowRate: '5.00' },
+          { name: 'Aave Ethereum DAI', symbol: 'DAI', tvl: '30000000', supplyRate: '3.00', borrowRate: '4.90' },
         ]),
     });
     queueEmptyTargets();
@@ -950,11 +886,16 @@ describe('GraphFeedService — Quality Filters (Q1/Q2)', () => {
     });
     queueEmptyTargets();
 
-    const report = await service.getStandardizedLendingBenchmarks();
-    expect(report.detailedRates).toHaveLength(1);
-    expect(report.detailedRates[0].symbol).toBe('USDT');
-    // USDC has no surviving live market → its own asset fallback.
-    expect(report.benchmarks.USDC.averageSupplyApy).toBe(0.048);
+    // STRICT: USDC has no surviving live market → the whole report is an error.
+    // DAI is also absent (other targets are empty), so both must be reported.
+    try {
+      await service.getStandardizedLendingBenchmarks();
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      const feedError = error as GraphFeedError;
+      expect(feedError.code).toBe('NO_LIVE_DATA');
+      expect(feedError.missingAssets).toEqual(['USDC', 'DAI']);
+    }
   });
 
   it('should exclude inactive (paused/frozen) markets client-side', async () => {
@@ -979,9 +920,14 @@ describe('GraphFeedService — Quality Filters (Q1/Q2)', () => {
     });
     queueEmptyTargets();
 
-    const report = await service.getStandardizedLendingBenchmarks();
-    expect(report.detailedRates).toHaveLength(0);
-    expect(report.source).toContain('Fallback');
+    // STRICT: the only market is frozen → zero usable rows → the strict
+    // contract throws instead of returning an empty fallback report.
+    try {
+      await service.getStandardizedLendingBenchmarks();
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      expect((error as GraphFeedError).code).toBe('ALL_TARGETS_FAILED');
+    }
   });
 
   it('should expose marketName, inputTokenId, and isActive metadata', async () => {
@@ -1000,6 +946,20 @@ describe('GraphFeedService — Quality Filters (Q1/Q2)', () => {
                 { rate: '5.12', side: 'BORROWER', type: 'VARIABLE' },
               ],
             },
+            {
+              name: 'Aave Arbitrum USDT',
+              isActive: true,
+              inputToken: { id: '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9', symbol: 'USDT' },
+              totalValueLockedUSD: '40000000',
+              rates: [{ rate: '3.10', side: 'LENDER', type: 'VARIABLE' }],
+            },
+            {
+              name: 'Aave Arbitrum DAI',
+              isActive: true,
+              inputToken: { id: '0xda10009cbd5d07dd0cecc66161fc93d7c9000da1', symbol: 'DAI' },
+              totalValueLockedUSD: '30000000',
+              rates: [{ rate: '3.00', side: 'LENDER', type: 'VARIABLE' }],
+            },
           ],
         },
         errors: [],
@@ -1008,12 +968,12 @@ describe('GraphFeedService — Quality Filters (Q1/Q2)', () => {
     queueEmptyTargets();
 
     const report = await service.getStandardizedLendingBenchmarks();
-    expect(report.detailedRates).toHaveLength(1);
-    const rate = report.detailedRates[0];
-    expect(rate.marketName).toBe('Aave Arbitrum USDCn');
-    expect(rate.inputTokenId).toBe('0xaf88d065e77c8cc2239327c5edb3a432268e5831');
-    expect(rate.isActive).toBe(true);
-    expect(rate.borrowApy).toBeCloseTo(0.0512, 4);
+    expect(report.detailedRates).toHaveLength(3);
+    const rate = report.detailedRates.find((r) => r.marketName === 'Aave Arbitrum USDCn');
+    expect(rate).toBeDefined();
+    expect(rate!.inputTokenId).toBe('0xaf88d065e77c8cc2239327c5edb3a432268e5831');
+    expect(rate!.isActive).toBe(true);
+    expect(rate!.borrowApy).toBeCloseTo(0.0512, 4);
   });
 
   it('should pass through already-decimal rates outside the percentage band', async () => {
@@ -1024,6 +984,8 @@ describe('GraphFeedService — Quality Filters (Q1/Q2)', () => {
       json: async () =>
         buildMockMessariResponse([
           { name: 'Aave v3 USDC', symbol: 'USDC', tvl: '50000000', supplyRate: '150', borrowRate: '200' },
+          { name: 'Aave v3 USDT', symbol: 'USDT', tvl: '40000000', supplyRate: '3.10', borrowRate: '5.00' },
+          { name: 'Aave v3 DAI', symbol: 'DAI', tvl: '30000000', supplyRate: '3.00', borrowRate: '4.90' },
         ]),
     });
     queueEmptyTargets();

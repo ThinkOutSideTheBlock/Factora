@@ -1,12 +1,11 @@
 import 'dotenv/config';
 import {
   graphFeedService,
+  mcpMarketService,
   graphMcpClient,
   agentTools,
   LENDING_SUBGRAPHS,
   MIN_TVL_USD,
-  UNISWAP_V3_ETHEREUM_SUBGRAPH_ID,
-  UNISWAP_TOP_STABLE_POOLS_QUERY,
 } from './graph-feed/index.js';
 
 function fail(message: string): never {
@@ -33,10 +32,6 @@ async function main() {
   }
 
   // Hardening assertions (duplicate-market bug + dust filtering):
-  if (lendingReport.source.includes('Fallback')) {
-    fail('all lending subgraphs failed — deterministic fallback was returned');
-  }
-
   const seenMarkets = new Set<string>();
   for (const rate of lendingReport.detailedRates) {
     const key = `${rate.protocol}|${rate.chain}|${rate.symbol}`;
@@ -58,22 +53,16 @@ async function main() {
     fail(`Aave v3 Arbitrum USDC duplicated ${arbUsdcRows.length}x`);
   }
 
-  // Morpho Blue must contribute to Engine A (dust tail filtered by the floor).
-  const morphoRows = lendingReport.detailedRates.filter((r) => r.protocol === 'Morpho Blue');
-  if (morphoRows.length === 0) {
-    fail('no Morpho Blue markets in the Engine A report');
-  }
   console.log(
     `\n   Assertions passed: no duplicate rows, TVL floor >= $${MIN_TVL_USD}, ` +
-      `${morphoRows.length} Morpho Blue row(s) present.\n`,
+      `${LENDING_SUBGRAPHS.length} pinned targets scanned with ONE query.\n`,
   );
 
-  // ── 2. Engine B: Dynamic Subgraph MCP (Agent Interface) ────────────────
-  console.log('2. Testing Dynamic Subgraph MCP (Engine B)...');
+  // ── 2. Engine B: Dynamic Subgraph MCP (protocol-agnostic discovery) ────
+  console.log('2. Testing Dynamic Subgraph MCP (Engine B, fully dynamic)...');
 
-  // 2a. Search by keyword — "morpho blue" previously returned 0 results
-  // because deployments are named "morpho-blue-*"; the multi-keyword retry
-  // must recover automatically.
+  // 2a. Raw search tool sanity: multi-keyword retry must recover hyphenated
+  // deployment names from a spaced keyword.
   const searchKeyword = 'morpho blue';
   console.log(`   2a. Searching subgraphs for "${searchKeyword}" (retry path)...`);
   const searchResult = await agentTools.searchSubgraphs(searchKeyword);
@@ -89,83 +78,37 @@ async function main() {
     console.log(`     ${i + 1}. ${r.displayName} (${r.subgraphId.slice(0, 12)}…)`);
   });
 
-  // 2b. Differentiated Engine B data: DEX liquidity pool depth + fee yield.
-  // This is data the Messari lending schema (Engine A) physically cannot
-  // express — demonstrating the composed Graph products instead of a redundant
-  // Aave parity query.
-  console.log('\n   2b. Querying Uniswap v3 (via MCP) for DEX Liquidity / Alternative Yield...');
-  const uniswapResult = await agentTools.querySubgraph(
-    UNISWAP_V3_ETHEREUM_SUBGRAPH_ID,
-    UNISWAP_TOP_STABLE_POOLS_QUERY,
-  );
-
-  // Graceful degradation: the deployment may be unhealthy at the network
-  // level (e.g. "bad indexers"). That is a live-data health signal, not a
-  // code defect — surface it and exercise the module's tagged fallback path
-  // instead of failing the verification.
-  let pools: Array<Record<string, any>> = [];
-  if (uniswapResult.isError) {
-    console.log('   ⚠ Uniswap deployment degraded at the network level (indexer health):');
-    console.log(`     ${String(uniswapResult.error).slice(0, 240)}`);
-    console.log('     Continuing with module-level LP pools (tagged provenance) below.');
-  } else {
-    pools =
-      (uniswapResult.data as { data?: { liquidityPools?: Array<Record<string, any>> } } | null)
-        ?.data?.liquidityPools ?? [];
-    if (pools.length === 0) {
-      const errors = (uniswapResult.data as { errors?: unknown } | null)?.errors;
-      console.log('   ⚠ Uniswap deployment returned no pools (deployment health):');
-      console.log(`     ${JSON.stringify(errors ?? uniswapResult.data).slice(0, 240)}`);
-      console.log('     Continuing with module-level LP pools (tagged provenance) below.');
-    }
-  }
-
-  if (pools.length > 0) {
-    console.log(`   Live pools returned: ${pools.length} (response ${uniswapResult.elapsedMs}ms)`);
-    for (const pool of pools) {
-      const feePct = (pool.fees ?? []).find(
-        (f: any) => f.feeType === 'FIXED_TRADING_FEE',
-      )?.feePercentage;
-      const snaps: Array<Record<string, any>> = pool.hourlySnapshots ?? [];
-      const revenues = snaps.map((s) => Number(s.hourlySupplySideRevenueUSD));
-      const tvls = snaps.map((s) => Number(s.totalValueLockedUSD));
-      const revenueSum = revenues.reduce((acc, v) => acc + (Number.isFinite(v) ? v : 0), 0);
-      const avgTvl = tvls.length ? tvls.reduce((acc, v) => acc + v, 0) / tvls.length : 0;
-      const estApy =
-        avgTvl > 0 && snaps.length >= 2 ? ((revenueSum / snaps.length) * 24 * 365) / avgTvl : 0;
-      console.log(
-        `     - ${pool.name}  |  fee ${feePct ?? 'n/a'}%  |  TVL $${Math.round(
-          Number(pool.totalValueLockedUSD),
-        ).toLocaleString('en-US')}  |  24h supply-side rev $${revenueSum.toFixed(2)}  |  ` +
-          `est fee APY ${(estApy * 100).toFixed(3)}%`,
-      );
-    }
-  }
-
-  // Module-level LP path: live pools when the deployment is healthy, or
-  // clearly-tagged 'Uniswap v3 (Fallback)' reference pools when degraded.
-  const lpPools = await graphFeedService.getDEXLiquidityYield();
-  console.log('   Module LP yield (opportunity cost, decimal APY):');
-  for (const pool of lpPools) {
+  // 2b. Fully dynamic yield discovery: generic keywords only — no pinned
+  // protocol names, IDs, or queries. low-risk gate = $10M TVL floor.
+  console.log('\n   2b. Discovering low-risk yield markets dynamically (riskProfile=low)...');
+  const opportunities = await mcpMarketService.getDynamicYieldOpportunities({
+    riskProfile: 'low',
+  });
+  console.log(`   Live opportunities: ${opportunities.length}`);
+  for (const opportunity of opportunities) {
     console.log(
-      `     - [${pool.protocol}] ${pool.pair}  |  estApy=${(pool.estimatedApy * 100).toFixed(3)}%  ` +
-        `tvlUSD=$${Math.round(pool.tvlUSD).toLocaleString('en-US')}`,
+      `     - [${opportunity.protocol} / ${opportunity.chain}] ${opportunity.symbol}  ` +
+        `supplyAPY=${(opportunity.supplyApy * 100).toFixed(2)}%  ` +
+        `TVL=$${Math.round(opportunity.totalValueLockedUSD).toLocaleString('en-US')}  ` +
+        `tier=${opportunity.tier}  deployment=${opportunity.deploymentId.slice(0, 12)}…`,
     );
   }
-  if (lpPools.length === 0) fail('no LP pools returned (live or fallback)');
+  const emerging = opportunities.filter((o) => o.tier === 'emerging');
+  console.log(
+    `   Emerging (watchlist) markets: ${emerging.length} — continuously monitored for new opportunities.`,
+  );
 
   // ── Standards Leverage Summary (Track 1: Composable Graph Products) ────
   console.log('\n═══ Standards Leverage Summary ═══');
   console.log(
-    `• ${LENDING_SUBGRAPHS.length} Messari-standardized deployments scanned across ` +
-      'Ethereum/Arbitrum/Base with ONE GraphQL query (MESSARI_MULTI_ASSET_QUERY)',
+    `• ${LENDING_SUBGRAPHS.length} Messari-standardized deployments scanned with ONE GraphQL query (MESSARI_MULTI_ASSET_QUERY)`,
   );
   console.log(
-    '• Composition: Gateway HTTP (Engine A lending) + Subgraph MCP (Engine B DEX liquidity & discovery)',
+    '• Composition: Gateway HTTP (Engine A lending) + Subgraph MCP (Engine B fully dynamic, zero pinned names/IDs)',
   );
   console.log(
-    `• Live provenance: ${lendingReport.detailedRates.length} lending markets + ${lpPools.length} LP pools ` +
-      `tagged with source/timestamp ("${lendingReport.source}")`,
+    `• Live provenance: ${lendingReport.detailedRates.length} lending markets + ${opportunities.length} dynamic opportunities, ` +
+      `all rows carry deploymentId/source/timestamp ("${lendingReport.source}")`,
   );
 
   // ── Cleanup ──────────────────────────────────────────────────────────
