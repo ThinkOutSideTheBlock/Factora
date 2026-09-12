@@ -1,0 +1,15 @@
+{
+  "name": "test-frontend",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@worldcoin/idkit-core": "^4.2.4"
+  }
+}
