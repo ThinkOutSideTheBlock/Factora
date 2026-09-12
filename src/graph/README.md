@@ -4,7 +4,7 @@ AI Underwriter Agent's live data layer. Fetches DeFi lending rates, DEX LP yield
 
 ## What It Does
 
-- **Engine A** — Queries 5 Messari-standardized subgraphs (Aave v3, Compound v3, Morpho) for live USDC/USDT/DAI supply/borrow APYs
+- **Engine A** — Queries **7 Messari-standardized deployments** (Aave v3, Compound v3, Morpho Blue across Ethereum, Arbitrum, Base) with ONE shared GraphQL query pattern for live USDC/USDT/DAI supply APYs
 - **Engine B** — Discovers and queries _any_ subgraph on The Graph via MCP (Model Context Protocol) at runtime
 - **Agent Tools** — Two composable functions (`searchSubgraphs`, `querySubgraph`) that an LLM agent can call to fetch blockchain data without hardcoded queries
 
@@ -17,7 +17,7 @@ npm install
 # Get a Graph API key at https://thegraph.com/studio/
 echo "GRAPH_API_KEY=your_key_here" > .env
 
-# Run graph tests (65 tests)
+# Run graph tests (77 tests)
 npm run test-graph
 
 # Live verification
@@ -40,6 +40,31 @@ Agent (LLM)
       └── Engine B: graphMcpClient.queryDynamic()
             └── npx mcp-remote → subgraphs.mcp.thegraph.com → any subgraph
 ```
+
+## Standards Leverage (Track 1: Composable Graph Products)
+
+The whole lending matrix runs on **one GraphQL query pattern**
+(`MESSARI_MULTI_ASSET_QUERY`) against **7 Messari-standardized deployments**:
+
+| Protocol | Ethereum | Arbitrum | Base |
+|---|---|---|---|
+| Aave v3 | ✅ | ✅ | excluded (gateway: no allocations) |
+| Compound v3 | ✅ | ✅ | excluded (custom schema, MCP-only) |
+| Morpho Blue | ✅ | ✅ | ✅ (floor-excluded until markets ≥ $1M TVL) |
+
+**What the shared schema bought us:** the official **Morpho Blue** subgraph
+implements the Messari standardized lending schema, so it was added to the
+gateway matrix with **zero query changes** — a one-line config entry reuses
+the same query, normalizer, deduplication, and fallback machinery as Aave and
+Compound. Isolated-pair quirks (Morpho Blue's thousands of dust markets) are
+absorbed by one shared constant (`MIN_TVL_USD = 1_000_000`) instead of any
+per-protocol code.
+
+**Composed Graph products:** Engine A (Gateway HTTP over standardized schemas)
+is composed with **Engine B** — the Subgraph MCP server — which discovered all
+three Morpho Blue deployment IDs at runtime, powers Uniswap v3 DEX liquidity
+yield (data the lending schema physically cannot express), and provides dynamic
+keyword discovery with multi-keyword retry for any of ~15,000 subgraphs.
 
 ## Agent Integration
 
@@ -68,6 +93,11 @@ const data = await agentTools.querySubgraph(
 // data.elapsedMs → 575 (ms)
 // data.isError → false
 ```
+
+**Function-calling catalog:** `AGENT_TOOL_DEFINITIONS` (exported from
+`agent-tools.ts`) provides OpenAI/MCP-compatible JSON Schema definitions for all
+four agent tools — register them with any LLM host out of the box. Full skill
+contract, tool schemas, and data conventions: [SKILL.md](./SKILL.md).
 
 **Key design decisions:**
 
@@ -99,6 +129,8 @@ The Graph's MCP server exposes these tools (accessible via `agentTools`):
 ```
 src/graph/
 ├── index.ts                 # Barrel exports
+├── SKILL.md                 # Agent skill contract (tool catalog + schemas)
+├── GRAPH_FEED_INTEGRATION_GUIDE.md  # Integration briefing
 ├── graph-feed.mock.ts       # Legacy mock market data
 ├── verify-graph-feed.ts     # Live verification script
 ├── graph-feed/
@@ -108,7 +140,7 @@ src/graph/
 │   ├── graph-feed.service.ts # Engine A + Engine B (core service)
 │   ├── graph-mcp.client.ts  # MCP subprocess singleton
 │   └── agent-tools.ts       # LLM agent tool registry
-└── __tests__/               # 65 tests (vitest)
+└── __tests__/               # 77 tests (vitest)
     ├── index.test.ts
     ├── graph-feed.service.test.ts
     ├── graph-mcp.client.test.ts
