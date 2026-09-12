@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { GraphFeedService } from '../graph-feed/graph-feed.service.js';
+import { GraphFeedService } from '../graph-feed/messari.service.js';
 import { GraphFeedError } from '../graph-feed/graph-feed.types.js';
 import {
   LENDING_SUBGRAPHS,
