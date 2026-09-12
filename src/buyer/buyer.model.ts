@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Proposal } from "../proposal/proposal.model.js";
+import { DebtDocument, Proposal } from "../proposal/proposal.model.js";
 import { AgentMatchResult } from "../underwriter/underwriter.model.js";
 import { GraphMarketData } from "../graph/graph-feed.mock.js";
 
@@ -38,15 +38,13 @@ import {
 } from "../x402/pricing.js";
 import type { LlmUsage } from "../underwriter/llm.client.js";
 
-const smartReportPricing = getSmartReportPricingConfig();
-
-/** Same constraints as a buyer search, plus an optional token budget for pricing. */
+/** Buyer search constraints + an optional free-form note for the AI underwriter. */
 export const SmartReportSchema = BuyerSearchSchema.extend({
-    maxTokens: z
-        .number()
-        .int()
-        .min(smartReportPricing.minTokens)
-        .max(smartReportPricing.maxTokens)
+    userMessage: z
+        .string()
+        .trim()
+        .min(1, "userMessage cannot be empty")
+        .max(2000, "userMessage must be at most 2000 characters")
         .optional(),
 });
 
@@ -54,16 +52,18 @@ export type SmartReportRequest = z.infer<typeof SmartReportSchema>;
 
 /** Transparent billing info attached to every paid smart-report response. */
 export interface SmartReportPricingInfo {
-    strategy: 'declared-budget-per-token';
-    budgetedTokens: number;
-    budgetedAmountTinybars: string;
+    strategy: "usage-estimate-per-token";
+    /** Server-side token estimate (overhead + per-candidate × matched count). */
+    estimatedTokens: number;
+    /** Amount the challenge pre-charges, in tinybars. */
+    estimatedAmountTinybars: string;
     config: SmartReportPricingConfig;
 }
 
 export interface SmartReportUsage extends LlmUsage {
-    /** Token budget the client declared (and was charged for). */
-    budgetedTokens: number;
-    /** Amount actually charged on-chain, in tinybars. */
+    /** Token estimate the challenge was priced on. */
+    estimatedTokens: number;
+    /** Amount charged on-chain (the estimate), in tinybars. */
     chargedTinybars: string;
 }
 
@@ -79,8 +79,26 @@ export interface MatchmakingResultItem {
 
 export interface BuyerMatchResponse {
     count: number;
-    proposals: Proposal[];
+    proposals: PublicProposal[];
 }
+
+export type PublicProposal = Omit<Proposal, "underwritingReview"> & {
+    debtDocument: Pick<
+        DebtDocument,
+        | "debtType"
+        | "industry"
+        | "debtorCompany"
+        | "invoiceNumber"
+        | "invoiceDate"
+        | "dueDate"
+        | "faceValue"
+        | "currency"
+        | "paymentTermsDays"
+        | "purchaseOrderNumber"
+        | "checkNumber"
+        | "disputeStatus"
+    >;
+};
 
 export interface BuyerSearchResponse {
     count: number;

@@ -1,4 +1,9 @@
-import { Proposal } from "../proposal/proposal.model.js";
+import {
+    DebtDocument,
+    Proposal,
+    UnderwritingReview,
+    UnderwritingReviewSchema,
+} from "../proposal/proposal.model.js";
 import { GraphMarketData } from "../graph/graph-feed.mock.js";
 import { BuyerSearchRequest } from "../buyer/buyer.model.js";
 import {
@@ -7,16 +12,61 @@ import {
 } from "./underwriter.model.js";
 import { callLlmJsonWithUsage, LlmUsage } from "./llm.client.js";
 import {
+    DEBT_DOCUMENT_REVIEW_SYSTEM_PROMPT,
     buildUnderwriterPrompt,
     UNDERWRITER_SYSTEM_PROMPT,
 } from "./underwriter.prompt.js";
 import { createLogger } from "../common/logger.js";
+import { loadUnderwriterReferenceData } from "./reference.data.js";
 
 const log = createLogger("underwriter");
 
 export interface UnderwriterAiResult {
     analysis: UnderwriterAnalysisResponse;
     usage: LlmUsage | null;
+}
+
+export async function reviewDebtDocument(
+    proposal: Pick<
+        Proposal,
+        "amount" | "requiredAmount" | "returnDateInDays" | "apy"
+    > & {
+        debtDocument: DebtDocument;
+    },
+): Promise<UnderwritingReview> {
+    log.info(`Reviewing debt document ${proposal.debtDocument.invoiceNumber}`);
+    const { data: rawResponse } = await callLlmJsonWithUsage({
+        systemPrompt: DEBT_DOCUMENT_REVIEW_SYSTEM_PROMPT,
+        userPrompt: JSON.stringify(
+            {
+                proposal: {
+                    amount: proposal.amount,
+                    requiredAmount: proposal.requiredAmount,
+                    returnDateInDays: proposal.returnDateInDays,
+                    apy: proposal.apy,
+                },
+                debtDocument: proposal.debtDocument,
+                mvpReferenceData: await loadUnderwriterReferenceData(),
+            },
+            null,
+            2,
+        ),
+    });
+    const parsed = UnderwritingReviewSchema.pick({
+        collectionConfidenceScore: true,
+        riskLevel: true,
+        debtQuality: true,
+        underwriterComment: true,
+        keyRisks: true,
+        missingEvidence: true,
+    }).parse(rawResponse);
+
+    return {
+        ...parsed,
+        status: "COMPLETED",
+        reviewedAt: new Date().toISOString(),
+        model: process.env.LLM_MODEL ?? null,
+    };
 }
 
 /**
@@ -27,6 +77,7 @@ export async function evaluateProposalsWithAI(
     candidates: Proposal[],
     buyerRequirements: BuyerSearchRequest,
     marketData: GraphMarketData,
+    buyerMessage?: string,
 ): Promise<UnderwriterAiResult> {
     if (!candidates || candidates.length === 0) {
         return {
@@ -50,6 +101,8 @@ export async function evaluateProposalsWithAI(
             buyerRequirements,
             candidates,
             marketData,
+            await loadUnderwriterReferenceData(),
+            buyerMessage,
         ),
     });
     const analysis = parseUnderwriterResponse(rawResponse, candidates);

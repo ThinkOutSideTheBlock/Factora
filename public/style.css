@@ -518,12 +518,38 @@ input:focus,
   font-family: var(--font-mono);
 }
 
+.form-section-heading {
+  margin: 18px 0 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-color);
+  color: var(--accent-cyan);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .proposal-item-footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
   font-size: 0.72rem;
   color: var(--text-dim);
+}
+
+.debt-document-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  color: var(--text-muted);
+  font-size: 0.74rem;
+}
+
+.debt-document-summary strong {
+  color: var(--text-main);
 }
 
 .address-tag {
@@ -946,6 +972,49 @@ input:focus,
   line-height: 1.6;
 }
 
+.debt-analysis-panel {
+  margin-top: 12px;
+  padding: 13px 14px 14px;
+  border: 1px solid rgba(99, 102, 241, 0.28);
+  border-radius: var(--radius-sm);
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.debt-analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.debt-analysis-grid span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.debt-analysis-grid small,
+.analysis-note {
+  color: var(--text-dim);
+  font-size: 0.68rem;
+}
+
+.debt-analysis-grid strong {
+  color: var(--text-main);
+  font-size: 0.86rem;
+}
+
+.debt-analysis-panel p {
+  color: #dbeafe;
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.analysis-note {
+  display: block;
+  margin-top: 8px;
+}
+
 .report-results-heading {
   display: flex;
   justify-content: space-between;
@@ -1208,6 +1277,10 @@ input:focus,
   .report-stat-strip,
   .skel-row {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .debt-analysis-grid {
+    grid-template-columns: 1fr;
   }
 
   .result-card-top {

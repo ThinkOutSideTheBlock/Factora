@@ -11,10 +11,12 @@ import {
     SmartReportResponse,
 } from "./buyer.model.js";
 import {
-    computeBudgetedAmount,
+    computeChargeTinybars,
+    estimateSmartReportTokens,
     getSmartReportPricingConfig,
 } from "../x402/pricing.js";
 import { createLogger } from "../common/logger.js";
+import { PublicProposal } from "./buyer.model.js";
 
 const log = createLogger("buyer");
 
@@ -48,35 +50,56 @@ export async function searchProposals(
         `Stage 1 hard filter: ${allProposals.length} proposals → ${filteredCandidates.length} candidates (amount ${criteria.amountMin}-${criteria.amountMax}, ${criteria.durationInDaysMin}-${criteria.durationInDaysMax}d, APY ≥ ${criteria.apyInPercentMin}%)`,
     );
 
+    const publicProposals: PublicProposal[] = filteredCandidates.map(
+        ({ underwritingReview: _review, ...proposal }) => proposal,
+    );
+
     return {
         count: filteredCandidates.length,
-        proposals: filteredCandidates,
+        proposals: publicProposals,
     };
 }
 
-/** Paid smart report: priced from the declared token budget, with a usage receipt. */
+/** Paid smart report: usage-estimate pricing with a transparent receipt. */
 export async function generateSmartReport(
     criteria: SmartReportRequest,
 ): Promise<SmartReportResponse> {
     const pricing = getSmartReportPricingConfig();
-    const budgetedTokens = criteria.maxTokens ?? pricing.maxTokens;
-    const budgetedAmountTinybars = computeBudgetedAmount(budgetedTokens, pricing);
-    log.info(`Smart report: budget ${budgetedTokens} tokens → price ${budgetedAmountTinybars} tinybars (${(Number(budgetedAmountTinybars) / 100_000_000).toFixed(4)} HBAR)`);
     const reportStartedAt = Date.now();
 
+    const filteredCandidates = filterProposals(
+        await getAllProposals(),
+        criteria,
+    );
+
+    // Usage-estimate pricing: the candidate count drives the LLM cost. This is
+    // the same computation as the challenge (smartReportPrice), so the paid
+    // retry settles exactly what the buyer was quoted.
+    const estimatedTokens = estimateSmartReportTokens(
+        filteredCandidates.length,
+        pricing,
+    );
+    const estimatedAmountTinybars = computeChargeTinybars(
+        estimatedTokens,
+        pricing,
+    );
+    log.info(
+        `Smart report estimate: ${filteredCandidates.length} candidates → ~${estimatedTokens} tokens → ${estimatedAmountTinybars} tinybars (${(Number(estimatedAmountTinybars) / 100_000_000).toFixed(4)} HBAR)`,
+    );
+
     const pricingInfo = {
-        strategy: 'declared-budget-per-token' as const,
-        budgetedTokens,
-        budgetedAmountTinybars,
+        strategy: "usage-estimate-per-token" as const,
+        estimatedTokens,
+        estimatedAmountTinybars,
         config: pricing,
     };
 
-    const freeMatch = await searchProposals(criteria);
-    const filteredCandidates = freeMatch.proposals;
     const marketBenchmark = await getMarketBenchmark();
 
     if (filteredCandidates.length === 0) {
-        log.info('Smart report: no candidates passed the hard filter — returning empty report (no LLM call)');
+        log.info(
+            "Smart report: no candidates passed the hard filter — returning empty report (no LLM call)",
+        );
         return {
             count: 0,
             overallSummary:
@@ -93,18 +116,46 @@ export async function generateSmartReport(
         filteredCandidates,
         criteria,
         marketBenchmark,
+        criteria.userMessage,
     );
     const evalMap = new Map(
         aiAnalysis.evaluations.map((e) => [e.proposalId, e]),
     );
 
     const results: MatchmakingResultItem[] = filteredCandidates.map((p) => {
+        const persistedReview = p.underwritingReview;
+        const baselineRisk =
+            persistedReview.riskLevel === "UNKNOWN"
+                ? "HIGH"
+                : persistedReview.riskLevel;
         const evaluation = evalMap.get(p.id) || {
             proposalId: p.id,
             fitScore: 50,
-            riskLevel: "MEDIUM",
+            riskLevel: baselineRisk,
             recommendation:
                 "Candidate passed hard filters. Evaluation pending.",
+            debtAnalysis: {
+                status: persistedReview.status,
+                collectionConfidenceScore:
+                    persistedReview.collectionConfidenceScore,
+                riskLevel: persistedReview.riskLevel,
+                debtQuality: persistedReview.debtQuality,
+                underwriterComment: persistedReview.underwriterComment,
+                keyRisks: persistedReview.keyRisks,
+                missingEvidence: persistedReview.missingEvidence,
+            },
+        };
+
+        evaluation.riskLevel = baselineRisk;
+        evaluation.debtAnalysis = {
+            status: persistedReview.status,
+            collectionConfidenceScore:
+                persistedReview.collectionConfidenceScore,
+            riskLevel: persistedReview.riskLevel,
+            debtQuality: persistedReview.debtQuality,
+            underwriterComment: persistedReview.underwriterComment,
+            keyRisks: persistedReview.keyRisks,
+            missingEvidence: persistedReview.missingEvidence,
         };
 
         return {
@@ -116,7 +167,7 @@ export async function generateSmartReport(
     // Sort by fitScore descending
     results.sort((a, b) => b.evaluation.fitScore - a.evaluation.fitScore);
     log.info(
-        `Smart report done: ${results.length} results in ${Date.now() - reportStartedAt}ms · usage ${usage ? `${usage.totalTokens} tokens` : 'n/a (fallback)'}`,
+        `Smart report done: ${results.length} results in ${Date.now() - reportStartedAt}ms · usage ${usage ? `${usage.totalTokens} tokens` : "n/a (fallback)"}`,
     );
 
     return {
@@ -128,8 +179,8 @@ export async function generateSmartReport(
         usage: usage
             ? {
                   ...usage,
-                  budgetedTokens,
-                  chargedTinybars: budgetedAmountTinybars,
+                  estimatedTokens,
+                  chargedTinybars: estimatedAmountTinybars,
               }
             : null,
     };

@@ -68,44 +68,52 @@
               />
             </div>
 
+            <div class="form-section-heading">Debt document</div>
             <div class="form-row">
               <div class="form-group">
-                <label for="nominalAmount">Nominal Amount ($)</label>
-                <input 
-                  type="number" 
-                  id="nominalAmount" 
-                  placeholder="10000" 
-                  min="1" 
-                  step="any" 
-                  required 
-                  oninput="updateApyPreview()"
-                />
+                <label for="debtType">Debt type</label>
+                <select id="debtType" required>
+                  <option value="INVOICE">Invoice</option>
+                  <option value="PURCHASE_ORDER">Purchase order</option>
+                  <option value="ACCOUNT_RECEIVABLE">Account receivable</option>
+                  <option value="CHECK">Check</option>
+                  <option value="OTHER">Other</option>
+                </select>
               </div>
-
               <div class="form-group">
-                <label for="requiredAmount">Required Amount ($)</label>
-                <input 
-                  type="number" 
-                  id="requiredAmount" 
-                  placeholder="9000" 
-                  min="1" 
-                  step="any" 
-                  required 
-                  oninput="updateApyPreview()"
-                />
+                <label for="debtIndustry">Industry</label>
+                <input type="text" id="debtIndustry" placeholder="Food distribution" required />
               </div>
             </div>
-
-            <div class="form-group">
-              <label for="returnDateInDays">Maturity Duration (Days)</label>
-              <input 
-                type="number" 
-                id="returnDateInDays" 
-                placeholder="90" 
-                min="1" 
-                required 
-                oninput="updateApyPreview()"
-              />
+            <div class="form-row">
+              <div class="form-group">
+                <label for="debtorCompany">Debtor company</label>
+                <input type="text" id="debtorCompany" placeholder="Northstar Foods Distribution Ltd." required />
+              </div>
+              <div class="form-group">
+                <label for="invoiceNumber">Invoice number</label>
+                <input type="text" id="invoiceNumber" placeholder="INV-2026-00421" required />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="invoiceDate">Invoice date</label>
+                <input type="date" id="invoiceDate" required oninput="updateApyPreview()" />
+              </div>
+              <div class="form-group">
+                <label for="dueDate">Due date (maturity)</label>
+                <input type="date" id="dueDate" required oninput="updateApyPreview()" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="faceValue">Face value — nominal debt ($)</label>
+                <input type="number" id="faceValue" placeholder="10000" min="1" step="any" required oninput="updateApyPreview()" />
+              </div>
+              <div class="form-group">
+                <label for="requiredAmount">Requested advance ($)</label>
+                <input type="number" id="requiredAmount" placeholder="9000" min="1" step="any" required oninput="updateApyPreview()" />
+              </div>
             </div>
 
             <!-- Live APY Calculation Preview -->
@@ -199,28 +207,28 @@
               <div class="form-row">
                 <div class="form-group">
                   <label>Nominal Min ($)</label>
-                  <input type="number" id="buyerAmountMin" value="100000" />
+                  <input type="number" id="buyerAmountMin" value="7500" />
                 </div>
                 <div class="form-group">
                   <label>Nominal Max ($)</label>
-                  <input type="number" id="buyerAmountMax" value="150000" />
+                  <input type="number" id="buyerAmountMax" value="1500000" />
                 </div>
               </div>
 
               <div class="form-row">
                 <div class="form-group">
                   <label>Duration Min (Days)</label>
-                  <input type="number" id="buyerDurationMin" value="90" />
+                  <input type="number" id="buyerDurationMin" value="45" />
                 </div>
                 <div class="form-group">
                   <label>Duration Max (Days)</label>
-                  <input type="number" id="buyerDurationMax" value="180" />
+                  <input type="number" id="buyerDurationMax" value="300" />
                 </div>
               </div>
 
               <div class="form-group">
                 <label>Minimum Required APY (%)</label>
-                <input type="number" id="buyerApyMin" value="25" step="0.1" />
+                  <input type="number" id="buyerApyMin" value="9" step="0.1" />
               </div>
 
               <button type="submit" class="btn btn-primary btn-block">
@@ -240,6 +248,10 @@
               <span>✨ Generate Smart Report</span>
               <span class="badge badge-warning">Paid</span>
             </button>
+            <div class="form-group" id="buyerMessageGroup">
+              <label for="buyerMessage">Message to the AI underwriter (optional)</label>
+              <textarea id="buyerMessage" rows="2" maxlength="2000" placeholder="e.g. Prefer invoices above $20k face value from logistics companies"></textarea>
+            </div>
           </div>
         </div>
 
@@ -315,6 +327,6 @@
     </footer>
   </div>
 
-  <script src="app.js?v=3"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>

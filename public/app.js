@@ -47,25 +47,42 @@ async function checkServerHealth() {
   }
 }
 
-// Live APY Calculation in Proposal Creator Form
+// Live APY Calculation in Proposal Creator Form.
+// Proposal economics derive from the debt document: nominal = face value,
+// maturity = payment terms (invoice → due). Only the advance is decided.
+function proposalTermDays() {
+  const from = document.getElementById('invoiceDate').value;
+  const to = document.getElementById('dueDate').value;
+  if (!from || !to) return 0;
+  return Math.round((Date.parse(to) - Date.parse(from)) / 86400000);
+}
+
 function updateApyPreview() {
-  const nominal = parseFloat(document.getElementById('nominalAmount').value) || 0;
+  const nominal = parseFloat(document.getElementById('faceValue').value) || 0;
   const required = parseFloat(document.getElementById('requiredAmount').value) || 0;
-  const days = parseInt(document.getElementById('returnDateInDays').value, 10) || 0;
+  const days = proposalTermDays();
 
   const apyValEl = document.getElementById('previewApyValue');
   const detailsEl = document.getElementById('apyFormulaDetails');
 
-  if (nominal <= 0 || required <= 0 || days <= 0 || required >= nominal) {
+  if (nominal <= 0 || required <= 0 || days <= 0) {
     apyValEl.textContent = '0.00%';
     apyValEl.style.color = 'var(--text-dim)';
-    if (required >= nominal && nominal > 0 && required > 0) {
-      detailsEl.textContent = '⚠️ Required amount must be less than nominal amount.';
+    if (days <= 0 && document.getElementById('invoiceDate').value && document.getElementById('dueDate').value) {
+      detailsEl.textContent = '⚠️ Due date must be after the invoice date.';
       detailsEl.style.color = 'var(--accent-rose)';
     } else {
-      detailsEl.textContent = 'Enter valid parameters to estimate annualized yield';
+      detailsEl.textContent = 'Enter the debt document and requested advance to estimate annualized yield';
       detailsEl.style.color = 'var(--text-dim)';
     }
+    return;
+  }
+
+  if (required >= nominal) {
+    apyValEl.textContent = '0.00%';
+    apyValEl.style.color = 'var(--text-dim)';
+    detailsEl.textContent = '⚠️ Requested advance must be less than the document face value.';
+    detailsEl.style.color = 'var(--accent-rose)';
     return;
   }
 
@@ -76,7 +93,7 @@ function updateApyPreview() {
 
   apyValEl.textContent = apy.toFixed(2) + '%';
   apyValEl.style.color = 'var(--accent-emerald)';
-  detailsEl.textContent = `Discount: $${discount.toLocaleString()} (${discountPercent}%) | Duration: ${days} days`;
+  detailsEl.textContent = `Discount: $${discount.toLocaleString()} (${discountPercent}%) | Terms: ${days} days (invoice → due)`;
   detailsEl.style.color = 'var(--text-muted)';
 }
 
@@ -88,6 +105,19 @@ function generateRandomAddress() {
     addr += hex[Math.floor(Math.random() * hex.length)];
   }
   document.getElementById('proposerAddress').value = addr;
+}
+
+function getDebtDocument() {
+  return {
+    debtType: document.getElementById('debtType').value,
+    industry: document.getElementById('debtIndustry').value.trim(),
+    debtorCompany: document.getElementById('debtorCompany').value.trim(),
+    invoiceNumber: document.getElementById('invoiceNumber').value.trim(),
+    invoiceDate: document.getElementById('invoiceDate').value,
+    dueDate: document.getElementById('dueDate').value,
+    faceValue: parseFloat(document.getElementById('faceValue').value),
+    currency: 'USD'
+  };
 }
 
 // ---------- In-browser x402 payment panel ----------
@@ -172,9 +202,8 @@ async function handleCreateProposal(e) {
   succBox.textContent = '';
 
   const proposerAddress = document.getElementById('proposerAddress').value.trim();
-  const amount = parseFloat(document.getElementById('nominalAmount').value);
   const requiredAmount = parseFloat(document.getElementById('requiredAmount').value);
-  const returnDateInDays = parseInt(document.getElementById('returnDateInDays').value, 10);
+  const debtDocument = getDebtDocument();
 
   btnText.textContent = 'Publishing...';
   btnSpinner.classList.remove('hidden');
@@ -184,7 +213,7 @@ async function handleCreateProposal(e) {
     const res = await fetch('/api/proposals', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ proposerAddress, amount, requiredAmount, returnDateInDays })
+      body: JSON.stringify({ proposerAddress, requiredAmount, debtDocument })
     });
 
     // x402 gate: unpaid request → decode invoice, offer agent payment.
@@ -192,7 +221,7 @@ async function handleCreateProposal(e) {
       const invoice = decodePaymentRequired(res);
       pendingPayments.proposal = {
         invoice,
-        onPay: () => publishProposalViaAgent({ proposerAddress, amount, requiredAmount, returnDateInDays })
+        onPay: () => publishProposalViaAgent({ proposerAddress, requiredAmount, debtDocument })
       };
       succBox.classList.add('hidden');
       errBox.innerHTML = renderPaymentPanelHtml('proposal', 'Pay & Publish Proposal');
@@ -319,9 +348,21 @@ function renderProposals(proposals) {
           <span class="address-tag" title="${p.proposerAddress}">Proposer: ${shortAddr}</span>
           <span>${createdDate}</span>
         </div>
+        ${renderDebtDocumentSummary(p.debtDocument)}
       </div>
     `;
   }).join('');
+}
+
+function renderDebtDocumentSummary(document) {
+  if (!document) return '';
+  return `
+    <div class="debt-document-summary">
+      <span><strong>${escapeHtml(document.debtType || 'Debt')}</strong> · ${escapeHtml(document.industry || 'Industry unknown')}</span>
+      <span>${escapeHtml(document.debtorCompany || 'Debtor unknown')}</span>
+      <span>${escapeHtml(document.invoiceNumber || 'No invoice number')} · due ${escapeHtml(document.dueDate || 'unknown')}</span>
+    </div>
+  `;
 }
 
 // ---------- x402 helpers ----------
@@ -368,9 +409,17 @@ async function sendUnpaidRequest() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         proposerAddress: '0x1111111111111111111111111111111111111111',
-        amount: 5000,
         requiredAmount: 4500,
-        returnDateInDays: 30
+        debtDocument: {
+          debtType: 'INVOICE',
+          industry: 'Food distribution',
+          debtorCompany: 'Northstar Foods Distribution Ltd.',
+          invoiceNumber: 'INV-2026-00421',
+          invoiceDate: '2026-09-01',
+          dueDate: '2026-10-01',
+          faceValue: 5000,
+          currency: 'USD'
+        }
       })
     });
 
@@ -406,9 +455,17 @@ async function payFromAgent() {
   try {
     const final = await runAgentPaymentStream('/api/proposals', {
       proposerAddress: '0x1111111111111111111111111111111111111111',
-      amount: 5000,
       requiredAmount: 4500,
-      returnDateInDays: 30
+      debtDocument: {
+        debtType: 'INVOICE',
+        industry: 'Food distribution',
+        debtorCompany: 'Northstar Foods Distribution Ltd.',
+        invoiceNumber: 'INV-2026-00421',
+        invoiceDate: '2026-09-01',
+        dueDate: '2026-10-01',
+        faceValue: 5000,
+        currency: 'USD'
+      }
     }, (evt) => updatePipeline(outputEl, evt.step, evt.status, evt.detail));
 
     const summary = {
@@ -564,6 +621,7 @@ function renderMatchedProposal(proposal) {
         <div class="metric-col"><span class="metric-label">Duration</span><span class="metric-value">${proposal.returnDateInDays}d</span></div>
         <div class="metric-col"><span class="metric-label">APY</span><span class="metric-value apy">${proposal.apy}%</span></div>
       </div>
+      ${renderDebtDocumentSummary(proposal.debtDocument)}
     </div>
   `;
 }
@@ -726,6 +784,26 @@ function renderEvaluationCard(item, index, marketBenchmark) {
         </div>
         <p>${escapeHtml(ev.recommendation)}</p>
       </div>
+      ${renderDebtAnalysis(ev.debtAnalysis)}
+    </div>
+  `;
+}
+
+function renderDebtAnalysis(analysis) {
+  if (!analysis) return '';
+  const score = Number(analysis.collectionConfidenceScore);
+  const risk = analysis.riskLevel || 'UNKNOWN';
+  const quality = analysis.debtQuality || 'UNKNOWN';
+  return `
+    <div class="debt-analysis-panel">
+      <div class="ai-writing-label"><strong>Debt document underwriting</strong><span class="badge ${riskBadgeClass(risk === 'UNKNOWN' ? 'HIGH' : risk)}">${escapeHtml(risk)} collection risk</span></div>
+      <div class="debt-analysis-grid">
+        <span><small>Collection confidence</small><strong>${Number.isFinite(score) ? score : 0}/100</strong></span>
+        <span><small>Debt quality</small><strong>${escapeHtml(quality)}</strong></span>
+        <span><small>Review status</small><strong>${escapeHtml(analysis.status || 'PENDING')}</strong></span>
+      </div>
+      <p>${escapeHtml(analysis.underwriterComment || 'No underwriter comment is available.')}</p>
+      ${analysis.missingEvidence?.length ? `<small class="analysis-note">Missing evidence: ${escapeHtml(analysis.missingEvidence.join('; '))}</small>` : ''}
     </div>
   `;
 }
@@ -860,6 +938,10 @@ function buildReportSummaryText(report) {
     const { proposal: p, evaluation: ev } = item;
     lines.push(`${i + 1}. #${p.id.substring(0, 8)} — fit ${ev.fitScore}/100 — ${ev.riskLevel} risk — APY ${p.apy}% — $${Number(p.amount).toLocaleString()} over ${p.returnDateInDays}d`);
     lines.push(`   ${ev.recommendation}`);
+    if (ev.debtAnalysis) {
+      lines.push(`   Debt review: ${ev.debtAnalysis.collectionConfidenceScore}/100 collection confidence — quality ${ev.debtAnalysis.debtQuality} — ${ev.debtAnalysis.status}`);
+      lines.push(`   Underwriter: ${ev.debtAnalysis.underwriterComment}`);
+    }
   });
   return lines.join('\n');
 }
@@ -908,7 +990,7 @@ async function generateReportViaAgent() {
   container.innerHTML = renderPipelineHtml();
 
   try {
-    const final = await runAgentPaymentStream('/api/buyer/smart-report', latestBuyerCriteria, (evt) =>
+    const final = await runAgentPaymentStream('/api/buyer/smart-report', getSmartReportPayload(), (evt) =>
       updatePipeline(container, evt.step, evt.status, evt.detail)
     );
 
@@ -925,9 +1007,11 @@ async function generateReportViaAgent() {
 
     const usage = latestReportData.usage;
     const usageLine = usage && usage.totalTokens
-      ? `${usage.totalTokens} LLM tokens · charged ${hbarFromTinybars(usage.chargedTinybars)} HBAR · `
+      ? `${usage.totalTokens} LLM tokens · charged ${hbarFromTinybars(usage.chargedTinybars)} HBAR (usage-estimate) · `
       : '';
-    metaEl.textContent = `Underwriter agent · ${usageLine}${settlementText(final.settlement)}`;
+    const note = getSmartReportPayload().userMessage;
+    const noteLine = note ? `Your note: “${note.length > 60 ? note.slice(0, 60) + '…' : note}” · ` : '';
+    metaEl.textContent = `Underwriter agent · ${usageLine}${noteLine}${settlementText(final.settlement)}`;
     metaEl.classList.remove('hidden');
     document.getElementById('reportActions').classList.remove('hidden');
     section.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -936,6 +1020,14 @@ async function generateReportViaAgent() {
     container.className = 'info-placeholder';
     container.innerHTML = `<div class="alert-box error-box">⚠️ ${escapeHtml(err.message)}</div>`;
   }
+}
+
+// Buyer search criteria + optional free-form note for the AI underwriter.
+// The note never affects the hard filter, so the free search and the paid
+// report stay consistent; it only steers the LLM evaluation.
+function getSmartReportPayload() {
+  const note = (document.getElementById('buyerMessage')?.value || '').trim();
+  return { ...latestBuyerCriteria, ...(note ? { userMessage: note } : {}) };
 }
 
 // Paid smart-report service: calls the LLM only after the buyer requests it.
@@ -959,7 +1051,7 @@ async function handleSmartReport() {
     const res = await fetch('/api/buyer/smart-report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(latestBuyerCriteria)
+      body: JSON.stringify(getSmartReportPayload())
     });
 
     // x402 gate: unpaid request → show per-token price and offer agent payment.

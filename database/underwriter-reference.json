@@ -1,0 +1,67 @@
+{
+    "datasetStatus": "SAMPLE_MVP_ONLY",
+    "isRealTime": false,
+    "description": "Fabricated reference data for local underwriting demos. It is not a credit bureau, financial statement, or production market feed.",
+    "asOf": "2026-09-01T00:00:00.000Z",
+    "companies": [
+        {
+            "companyId": "sample-northstar-foods",
+            "legalName": "Northstar Foods Distribution Ltd.",
+            "industry": "Food distribution",
+            "country": "US",
+            "sampleCreditBand": "B",
+            "samplePaymentScore": 78,
+            "sampleAverageDaysToPay": 46,
+            "sampleLatePaymentRate": 0.08,
+            "dataStatus": "FABRICATED_MVP_RECORD",
+            "notes": "Synthetic company profile for testing debtor-quality prompts only."
+        },
+        {
+            "companyId": "sample-apex-builders",
+            "legalName": "Apex Builders & Civil Works Inc.",
+            "industry": "Construction",
+            "country": "US",
+            "sampleCreditBand": "C",
+            "samplePaymentScore": 61,
+            "sampleAverageDaysToPay": 71,
+            "sampleLatePaymentRate": 0.19,
+            "dataStatus": "FABRICATED_MVP_RECORD",
+            "notes": "Synthetic company profile for testing longer-cycle and retention-risk cases."
+        },
+        {
+            "companyId": "sample-orbit-medical",
+            "legalName": "Orbit Medical Supplies Co.",
+            "industry": "Healthcare supplies",
+            "country": "US",
+            "sampleCreditBand": "A",
+            "samplePaymentScore": 89,
+            "sampleAverageDaysToPay": 34,
+            "sampleLatePaymentRate": 0.04,
+            "dataStatus": "FABRICATED_MVP_RECORD",
+            "notes": "Synthetic company profile for testing strong payer evidence with verification caveats."
+        }
+    ],
+    "industries": [
+        {
+            "industry": "Food distribution",
+            "sampleBenchmarkDefaultRate": 0.035,
+            "sampleAverageDsoDays": 42,
+            "sampleLiquidityIndex": 76,
+            "dataStatus": "FABRICATED_MVP_SNAPSHOT"
+        },
+        {
+            "industry": "Construction",
+            "sampleBenchmarkDefaultRate": 0.085,
+            "sampleAverageDsoDays": 68,
+            "sampleLiquidityIndex": 54,
+            "dataStatus": "FABRICATED_MVP_SNAPSHOT"
+        },
+        {
+            "industry": "Healthcare supplies",
+            "sampleBenchmarkDefaultRate": 0.025,
+            "sampleAverageDsoDays": 38,
+            "sampleLiquidityIndex": 83,
+            "dataStatus": "FABRICATED_MVP_SNAPSHOT"
+        }
+    ]
+}
