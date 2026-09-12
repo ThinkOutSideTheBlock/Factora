@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import {
-  graphFeedService,
+  getStandardizedLendingBenchmarks,
   mcpMarketService,
   graphMcpClient,
   agentTools,
@@ -17,7 +17,7 @@ async function main() {
 
   // ── 1. Engine A: Standardized Lending Benchmarks (Gateway HTTP, Messari) ─
   console.log('1. Testing Standardized Multi-Asset Lending Benchmarks...');
-  const lendingReport = await graphFeedService.getStandardizedLendingBenchmarks();
+  const lendingReport = await getStandardizedLendingBenchmarks();
   console.log('   Source:', lendingReport.source);
   console.log('   USDC:', lendingReport.benchmarks.USDC);
   console.log('   USDT:', lendingReport.benchmarks.USDT);

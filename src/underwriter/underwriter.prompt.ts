@@ -1,5 +1,5 @@
 import { BuyerSearchRequest } from "../buyer/buyer.model.js";
-import { GraphMarketData } from "../graph/graph-feed.mock.js";
+import { GraphMarketData } from "../graph/graph-feed.js";
 import { Proposal } from "../proposal/proposal.model.js";
 
 export const DEBT_DOCUMENT_REVIEW_SYSTEM_PROMPT = `You are Factora's senior invoice-factoring underwriter. Review one debt document conservatively for collectability and purchase quality.

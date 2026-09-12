@@ -4,7 +4,7 @@ import {
     UnderwritingReview,
     UnderwritingReviewSchema,
 } from "../proposal/proposal.model.js";
-import { GraphMarketData } from "../graph/graph-feed.mock.js";
+import { GraphMarketData } from "../graph/graph-feed.js";
 import { BuyerSearchRequest } from "../buyer/buyer.model.js";
 import {
     UnderwriterAnalysisResponse,

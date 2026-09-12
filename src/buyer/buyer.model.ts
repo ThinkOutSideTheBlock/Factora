@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { DebtDocument, Proposal } from "../proposal/proposal.model.js";
 import { AgentMatchResult } from "../underwriter/underwriter.model.js";
-import { GraphMarketData } from "../graph/graph-feed.mock.js";
+import { GraphMarketData } from "../graph/graph-feed.js";
 
 export const BuyerSearchSchema = z
     .object({

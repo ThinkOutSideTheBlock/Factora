@@ -1,6 +1,6 @@
 import { Proposal } from "../proposal/proposal.model.js";
 import { getAllProposals } from "../proposal/proposal.storage.js";
-import { getMarketBenchmark } from "../graph/graph-feed.mock.js";
+import { getGraphFeed } from "../graph/graph-feed.js";
 import { evaluateProposalsWithAI } from "../underwriter/underwriter.agent.js";
 import {
     BuyerMatchResponse,
@@ -94,7 +94,7 @@ export async function generateSmartReport(
         config: pricing,
     };
 
-    const marketBenchmark = await getMarketBenchmark();
+    const marketBenchmark = await getGraphFeed();
 
     if (filteredCandidates.length === 0) {
         log.info(

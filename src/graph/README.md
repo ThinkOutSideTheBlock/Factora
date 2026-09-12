@@ -34,7 +34,7 @@ Agent (LLM)
 ├── searchSubgraphs("curve usdc")    → finds subgraph IDs
 └── querySubgraph(ID, "{ ... }")     → gets live data
       │
-      ├── Engine A: graphFeedService.getStandardizedLendingBenchmarks()
+      ├── Engine A: getStandardizedLendingBenchmarks()
       │     └── Direct HTTP → Messari subgraphs → USDC/USDT/DAI benchmarks
       │
       └── Engine B: graphMcpClient.queryDynamic()
@@ -131,7 +131,7 @@ src/graph/
 ├── index.ts                 # Barrel exports
 ├── SKILL.md                 # Agent skill contract (tool catalog + schemas)
 ├── GRAPH_FEED_INTEGRATION_GUIDE.md  # Integration briefing
-├── graph-feed.mock.ts       # Legacy mock market data used by the existing buyer path
+├── graph-feed.ts            # Unified live Messari + MCP market feed
 ├── verify-graph-feed.ts     # Live verification script
 ├── graph-feed/
 │   ├── index.ts             # Graph feed barrel exports
