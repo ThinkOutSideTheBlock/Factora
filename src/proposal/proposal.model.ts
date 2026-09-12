@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { SelfieCheckRecord } from "../world/selfie-check.model.js";
 
 export const ProposalStatusEnum = z.enum(["PENDING", "ACCEPTED"]);
 export type ProposalStatus = z.infer<typeof ProposalStatusEnum>;
@@ -123,4 +124,16 @@ export interface Proposal {
     apy: number;
     status: ProposalStatus;
     createdAt: string;
+    /**
+     * World ID Selfie Check (Beta) verification — abuse-prevention /
+     * eligibility signal proving the proposer is a real, live human.
+     * Present only after the seller's successful check.
+     */
+    selfieCheck?: SelfieCheckRecord;
+    /** Buyer's Selfie Check signature: the nullifier acts as the buyer's
+     *  pseudonymous identity; presence of this record means "signed". */
+    buyerSignature?: {
+        nullifier: string;
+        signedAt: string;
+    };
 }

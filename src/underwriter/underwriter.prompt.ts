@@ -48,7 +48,13 @@ Return only a valid JSON object with this exact shape:
   ]
 }
 
-Include exactly one evaluation for every candidate and no other proposal IDs. fitScore must be an integer from 0 through 100. Keep fitScore separate from collection confidence. Use the persisted debt-document risk as the baseline risk; do not upgrade a pending or unknown review to LOW without supplied evidence. Base fit on APY relative to the buyer's minimum and market APY, maturity relative to the buyer's range, amount relative to the buyer's range, benchmark default rate, liquidity index, debt quality, and collection confidence. Higher risk must not receive a stronger recommendation without a clear yield-based reason.`;
+Include exactly one evaluation for every candidate and no other proposal IDs. fitScore must be an integer from 0 through 100. Keep fitScore separate from collection confidence. Use the persisted debt-document risk as the baseline risk; do not upgrade a pending or unknown review to LOW without supplied evidence. Base fit on APY relative to the buyer's minimum and market APY, maturity relative to the buyer's range, amount relative to the buyer's range, benchmark default rate, liquidity index, debt quality, and collection confidence. Higher risk must not receive a stronger recommendation without a clear yield-based reason.
+
+Ranking rules (the caller sorts by fitScore, so fitScore IS the ordering):
+1. buyerMessage (if present in the payload) is high-priority free-form guidance from the buyer. Use it to DIFFERENTIATE candidates: a candidate that matches the buyer's stated preferences (industries, amounts, debtors, regions, risk appetite, etc.) must receive a visibly higher fitScore than an otherwise-similar candidate that does not. State in the recommendation how the message influenced the score.
+2. If buyerMessage is absent, or cannot be applied because it conflicts with the hard filters or the evidence rules, say so in overallSummary and rank on the numeric criteria alone.
+3. Never give all candidates the same or near-identical fitScores: spread them to reflect real differences (yield vs market and the buyer's minimum, maturity vs the buyer's range, amount vs range, debt quality, collection confidence, and buyerMessage preferences).
+4. Order the evaluations array best-first by final fitScore.`;
 
 /** Builds the underwriting task payload; it does not call the model. */
 export function buildUnderwriterPrompt(

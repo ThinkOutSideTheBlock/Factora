@@ -164,17 +164,19 @@ export async function generateSmartReport(
         };
     });
 
-    // Sort by fitScore descending
-    results.sort((a, b) => b.evaluation.fitScore - a.evaluation.fitScore);
+    // Deterministic ranking: fitScore (which now carries the buyerMessage
+    // preferences per the underwriter prompt) descending, with stable
+    // tie-breakers so equal scores never fall back to arbitrary storage order.
+    const ranked = rankMatchResults(results);
     log.info(
-        `Smart report done: ${results.length} results in ${Date.now() - reportStartedAt}ms · usage ${usage ? `${usage.totalTokens} tokens` : "n/a (fallback)"}`,
+        `Smart report done: ${ranked.length} results in ${Date.now() - reportStartedAt}ms · usage ${usage ? `${usage.totalTokens} tokens` : "n/a (fallback)"}`,
     );
 
     return {
-        count: results.length,
+        count: ranked.length,
         overallSummary: aiAnalysis.overallSummary,
         marketBenchmark,
-        results,
+        results: ranked,
         pricing: pricingInfo,
         usage: usage
             ? {
@@ -184,4 +186,21 @@ export async function generateSmartReport(
               }
             : null,
     };
+}
+
+/**
+ * Orders smart-report results for presentation: fitScore descending (the
+ * underwriter is instructed to fold the buyer's userMessage preferences into
+ * fitScore), then APY descending, then nominal amount descending as
+ * deterministic tie-breakers. Pure function — trivially unit-testable.
+ */
+export function rankMatchResults<
+    T extends { proposal: { apy: number; amount: number }; evaluation: { fitScore: number } },
+>(results: T[]): T[] {
+    return [...results].sort(
+        (a, b) =>
+            b.evaluation.fitScore - a.evaluation.fitScore ||
+            b.proposal.apy - a.proposal.apy ||
+            b.proposal.amount - a.proposal.amount,
+    );
 }

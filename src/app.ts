@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { proposalRouter } from './proposal/proposal.controller.js';
 import { buyerRouter } from './buyer/buyer.controller.js';
 import { agentRouter } from './agent/agent.controller.js';
+import { worldRouter } from './world/world.controller.js';
 import { paymentMiddleware } from '@x402/express';
 import {
   buildX402Routes,
@@ -95,6 +96,7 @@ app.use('/api/proposals', proposalRouter);
 app.use('/api/buyer', buyerRouter);
 app.use('/api/matchmaking', buyerRouter); // Alias for compatibility with plan
 app.use('/api/agent', agentRouter);
+app.use('/api/world', worldRouter); // World ID Selfie Check (Beta) verification
 
 // Central error handler — logs the cause, returns clean JSON. Also converts
 // body-parser's HTML error pages (e.g. malformed JSON) into API errors.

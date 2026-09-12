@@ -113,22 +113,27 @@ proposalRouter.post(
 
 /**
  * GET /api/proposals
- * Fetch list of proposals (optional filter by ?status=PENDING).
+ * Fetch list of proposals. Optional filters:
+ *  - ?status=PENDING|ACCEPTED — filter by status
+ *  - ?proposer=0x…            — only proposals created by this address
+ *                               (case-insensitive; powers "My Proposals")
  */
 proposalRouter.get("/", async (req: Request, res: Response): Promise<void> => {
     try {
         const statusQuery = req.query.status as string | undefined;
-        const proposals = await getAllProposals();
+        const proposerQuery = req.query.proposer as string | undefined;
+        let proposals = await getAllProposals();
 
         if (statusQuery) {
-            const filtered = proposals.filter(
+            proposals = proposals.filter(
                 (p) => p.status.toUpperCase() === statusQuery.toUpperCase(),
             );
-            res.status(200).json({
-                count: filtered.length,
-                proposals: filtered,
-            });
-            return;
+        }
+        if (proposerQuery) {
+            const wanted = proposerQuery.trim().toLowerCase();
+            proposals = proposals.filter(
+                (p) => p.proposerAddress.toLowerCase() === wanted,
+            );
         }
 
         res.status(200).json({ count: proposals.length, proposals });

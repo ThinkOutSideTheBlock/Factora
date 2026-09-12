@@ -187,6 +187,28 @@
           </div>
         </section>
       </div>
+
+      <!-- My Proposals (seller view) -->
+      <section id="myProposalsSection" class="card glass-panel">
+        <div class="card-header">
+          <div>
+            <h2>My Proposals</h2>
+            <p class="card-desc">Enter your public key to see your own listings. When a buyer signs one, perform the Selfie Check here to confirm you are a real, live human.</p>
+          </div>
+          <span class="badge badge-primary">Seller</span>
+        </div>
+
+        <div class="my-proposals-controls">
+          <div class="form-group my-proposals-key-group">
+            <label for="myProposalsKeyInput">Your public key (proposer address)</label>
+            <input type="text" id="myProposalsKeyInput" class="text-input" placeholder="0x…" autocomplete="off" />
+          </div>
+          <button type="button" class="btn btn-primary" onclick="loadMyProposals()">Load My Proposals</button>
+        </div>
+
+        <div id="myProposalsStatus" class="selfie-status hidden"></div>
+        <div id="myProposalsList" class="proposals-list"></div>
+      </section>
     </main>
 
     <!-- TAB 2: Free Matchmaker + Paid Smart Report -->
@@ -325,8 +347,53 @@
     <footer class="footer">
       <p>Factora / ClaimFlow &bull; Local Testing Environment &bull; Port: 3000</p>
     </footer>
+
+    <!-- World ID Selfie Check Modal (buyer "Buy this debt" + seller verification) -->
+    <div id="selfieModal" class="modal-overlay hidden" onclick="if (event.target === this) closeSelfieModal()">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3><span class="modal-icon" id="selfieModalIcon">🪪</span> <span id="selfieModalTitle">World ID Selfie Check</span></h3>
+          <button type="button" class="btn btn-secondary btn-icon" onclick="closeSelfieModal()" title="Close">✕</button>
+        </div>
+        <p class="card-desc" id="selfieModalDesc">
+          Prove the proposer of <strong id="selfieProposalLabel">#…</strong> is a real, live human.
+          Selfie Check (Beta) is an abuse-prevention / eligibility signal that reduces sybil and
+          scripted-listing risk on this proposal.
+        </p>
+
+        <div class="form-group">
+          <label for="selfieAppIdInput">World App ID (pk)</label>
+          <input type="text" id="selfieAppIdInput" class="text-input" placeholder="app_…" autocomplete="off" />
+        </div>
+
+        <div class="form-group">
+          <label for="selfieSigningKeyInput">RP Signing Key (private key)</label>
+          <input type="password" id="selfieSigningKeyInput" class="text-input" placeholder="0x…" autocomplete="off" />
+          <small class="field-hint">Paste your World relying-party private key (0x + 64 hex chars). Leave empty to use the server's configured key.</small>
+        </div>
+
+        <div id="selfieConnectorBox" class="selfie-connector hidden">
+          <div class="selfie-connector-label">Open this link on your phone (sandbox/staging):</div>
+          <div id="selfieConnectorUri" class="code-block"></div>
+          <div class="selfie-connector-actions">
+            <button type="button" class="btn btn-secondary" onclick="copySelfieConnectorUri()">📋 Copy link</button>
+            <a class="btn btn-secondary" href="https://simulator.worldcoin.org" target="_blank" rel="noopener">Open Simulator ↗</a>
+          </div>
+        </div>
+
+        <div id="selfieStatus" class="selfie-status">Enter the World App ID (pk) and start the flow.</div>
+        <div id="selfieResultBox" class="alert-box success-box hidden"></div>
+
+        <div class="modal-actions">
+          <button type="button" id="selfieStartBtn" class="btn btn-primary" onclick="startSelfieCheck()">
+            Start Selfie Check
+          </button>
+          <span id="selfieSpinner" class="spinner hidden"></span>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>

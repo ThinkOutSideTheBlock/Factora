@@ -304,6 +304,38 @@ function updateStats(proposals) {
   totalVolumeValEl.textContent = '$' + totalVol.toLocaleString();
 }
 
+/**
+ * Renders the permanent "Selfie Verified" badge for a verified proposal.
+ */
+function renderSelfieVerifiedBadge(proposal) {
+  const shortNullifier = escapeHtml(String(proposal.selfieCheck?.nullifier || '').substring(0, 12));
+  return `<span class="badge badge-success selfie-badge" title="World ID Selfie Check verified${shortNullifier ? ` (nullifier ${shortNullifier}…)` : ''}">🪪 Selfie Verified</span>`;
+}
+
+/**
+ * Renders the World ID Selfie Check action for a proposal that a buyer has
+ * already signed (seller's "My Proposals" view). Verification is only
+ * possible after a buyer signature — that's the track's continuity gate.
+ */
+function renderSelfieCheckAction(proposal, label) {
+  if (proposal.selfieCheck && proposal.selfieCheck.status === 'VERIFIED') {
+    return renderSelfieVerifiedBadge(proposal);
+  }
+  return `<button type="button" class="btn btn-secondary btn-sm" onclick="openSelfieModal('${proposal.id}')">${escapeHtml(label)}</button>`;
+}
+
+/**
+ * Buyer-side action: sign ("buy") the proposal. Signing flips the proposal
+ * to ACCEPTED, which is what tells the seller to perform their Selfie Check.
+ */
+function renderBuyAction(proposal) {
+  if (proposal.status === 'ACCEPTED' || proposal.buyerAddress) {
+    const who = escapeHtml(proposal.buyerAddress || 'a buyer');
+    return `<span class="badge badge-success" title="Signed by ${who}">✓ Signed</span>`;
+  }
+  return `<button type="button" class="btn btn-secondary btn-sm" onclick="openSelfieModal('${proposal.id}','buyer')">💰 Buy this debt</button>`;
+}
+
 function renderProposals(proposals) {
   if (proposals.length === 0) {
     proposalsEmptyEl.classList.remove('hidden');
@@ -311,10 +343,9 @@ function renderProposals(proposals) {
   }
 
   proposalsListEl.innerHTML = proposals.map(p => {
-    const shortAddr = p.proposerAddress.length > 14 
+    const shortAddr = p.proposerAddress.length > 14
       ? p.proposerAddress.substring(0, 6) + '...' + p.proposerAddress.substring(p.proposerAddress.length - 4)
       : p.proposerAddress;
-
     const shortId = p.id.substring(0, 8);
     const createdDate = new Date(p.createdAt).toLocaleDateString() + ' ' + new Date(p.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -349,6 +380,7 @@ function renderProposals(proposals) {
           <span>${createdDate}</span>
         </div>
         ${renderDebtDocumentSummary(p.debtDocument)}
+        ${p.selfieCheck && p.selfieCheck.status === 'VERIFIED' ? `<div class="proposal-item-actions">${renderSelfieVerifiedBadge(p)}</div>` : ''}
       </div>
     `;
   }).join('');
@@ -363,6 +395,297 @@ function renderDebtDocumentSummary(document) {
       <span>${escapeHtml(document.invoiceNumber || 'No invoice number')} · due ${escapeHtml(document.dueDate || 'unknown')}</span>
     </div>
   `;
+}
+
+// ---------- World ID Selfie Check (Beta) ----------
+// Every proposal card carries a "Selfie Check" button. Clicking it opens a
+// popup that runs the real World ID flow: signed RP context from our backend →
+// IDKit (staging, selfieCheckLegacy preset) → proof verified server-side
+// against the World verify API → proposal marked "Selfie Verified".
+// The pk (World App ID) is entered by the user in the popup and remembered.
+
+const selfieState = { proposalId: null, mode: 'seller' };
+const SELFIE_DEFAULT_APP_ID = 'app_d5e4029b334e9d0ee4d9c45408af8035';
+
+function openSelfieModal(proposalId, mode = 'seller') {
+  selfieState.proposalId = proposalId;
+  selfieState.mode = mode === 'buyer' ? 'buyer' : 'seller';
+  const isBuyer = selfieState.mode === 'buyer';
+
+  document.getElementById('selfieModalIcon').textContent = isBuyer ? '💰' : '🪪';
+  document.getElementById('selfieModalTitle').textContent = isBuyer
+    ? 'Buy this debt — Selfie Check'
+    : 'World ID Selfie Check';
+  document.getElementById('selfieModalDesc').innerHTML = isBuyer
+    ? `To sign (buy) proposal <strong id="selfieProposalLabel">#${String(proposalId).substring(0, 8)}</strong>, verify you are a real, live human with World ID Selfie Check. Your verified signature flips the listing to <strong>ACCEPTED</strong> and notifies the seller.`
+    : `Prove the proposer of <strong id="selfieProposalLabel">#${String(proposalId).substring(0, 8)}</strong> is a real, live human. Selfie Check (Beta) is an abuse-prevention / eligibility signal that reduces sybil and scripted-listing risk on this proposal.`;
+
+  const appIdInput = document.getElementById('selfieAppIdInput');
+  if (!appIdInput.value.trim()) {
+    appIdInput.value = localStorage.getItem('factoraWorldAppId') || SELFIE_DEFAULT_APP_ID;
+  }
+
+  const keyInput = document.getElementById('selfieSigningKeyInput');
+  if (!keyInput.value.trim()) {
+    keyInput.value = localStorage.getItem('factoraWorldSigningKey') || '';
+  }
+
+  document.getElementById('selfieConnectorBox').classList.add('hidden');
+  document.getElementById('selfieResultBox').classList.add('hidden');
+  setSelfieStatus('Enter the World App ID (pk) and start the flow.', false);
+  document.getElementById('selfieModal').classList.remove('hidden');
+}
+
+function closeSelfieModal() {
+  document.getElementById('selfieModal').classList.add('hidden');
+  selfieState.proposalId = null;
+}
+
+function setSelfieStatus(message, isError) {
+  const el = document.getElementById('selfieStatus');
+  el.textContent = message;
+  el.classList.toggle('selfie-status-error', Boolean(isError));
+}
+
+function copySelfieConnectorUri() {
+  const uri = document.getElementById('selfieConnectorUri').textContent;
+  if (uri) navigator.clipboard.writeText(uri).catch(() => {});
+}
+
+/**
+ * Flips every buyer "Buy this debt" button for this proposal into a
+ * "✓ Signed" badge across all views without re-running a (possibly paid)
+ * search.
+ */
+function markSignedEverywhere(proposalId) {
+  document.querySelectorAll(`button[onclick*="openSelfieModal('${proposalId}','buyer')"]`).forEach((btn) => {
+    const badge = document.createElement('span');
+    badge.className = 'badge badge-success';
+    badge.title = 'Signed by a World ID verified buyer';
+    badge.textContent = '✓ Signed';
+    btn.replaceWith(badge);
+  });
+}
+
+/**
+ * Flips every "Perform Selfie Check" button for this proposal into the
+ * verified badge — across My Proposals and any other view — without
+ * re-running a (possibly paid) search.
+ */
+function markSelfieVerifiedEverywhere(proposalId, nullifier) {
+  const shortNullifier = escapeHtml(String(nullifier || '').substring(0, 12));
+  document.querySelectorAll(`button[onclick*="openSelfieModal('${proposalId}','seller')"]`).forEach((btn) => {
+    const badge = document.createElement('span');
+    badge.className = 'badge badge-success selfie-badge';
+    badge.title = 'World ID Selfie Check verified' + (shortNullifier ? ` (nullifier ${shortNullifier}…)` : '');
+    badge.textContent = '🪪 Selfie Verified';
+    btn.replaceWith(badge);
+  });
+}
+
+// ---------- My Proposals (seller side) ----------
+// The seller enters their public key and sees only their own listings. A
+// proposal that a buyer has signed (status ACCEPTED) shows the Selfie Check
+// button — the track's continuity gate before the deal proceeds.
+
+function getMyProposalsKey() {
+  return document.getElementById('myProposalsKeyInput').value.trim();
+}
+
+async function loadMyProposals(options = {}) {
+  const key = getMyProposalsKey();
+  const statusEl = document.getElementById('myProposalsStatus');
+  const listEl = document.getElementById('myProposalsList');
+
+  if (!/^0x[0-9a-fA-F]{40}$/i.test(key)) {
+    if (!options.silent) {
+      statusEl.textContent = 'Enter a valid public key: a 0x-prefixed EVM address (0x + 40 hex chars).';
+      statusEl.classList.remove('hidden');
+      statusEl.classList.add('selfie-status-error');
+    }
+    return;
+  }
+
+  localStorage.setItem('factoraProposerKey', key);
+
+  try {
+    const res = await fetch('/api/proposals?proposer=' + encodeURIComponent(key));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const mine = data.proposals || [];
+
+    if (!options.silent || mine.length > 0) {
+      statusEl.textContent = mine.length === 0
+        ? 'No proposals found for this public key.'
+        : `${mine.length} proposal${mine.length === 1 ? '' : 's'} found.`;
+      statusEl.classList.remove('hidden', 'selfie-status-error');
+    }
+
+    listEl.innerHTML = mine.map(renderMyProposal).join('');
+  } catch (err) {
+    if (!options.silent) {
+      statusEl.textContent = '⚠️ Could not load your proposals: ' + (err && err.message ? err.message : String(err));
+      statusEl.classList.remove('hidden');
+      statusEl.classList.add('selfie-status-error');
+    }
+  }
+}
+
+function renderMyProposal(p) {
+  const shortId = String(p.id).substring(0, 8);
+  const signedDate = p.buyerSignature?.signedAt
+    ? new Date(p.buyerSignature.signedAt).toLocaleDateString() + ' ' + new Date(p.buyerSignature.signedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : '';
+
+  let action;
+  let signingInfo = '';
+  if (p.selfieCheck && p.selfieCheck.status === 'VERIFIED') {
+    action = renderSelfieVerifiedBadge(p);
+    signingInfo = '<span class="my-proposals-signed">✓ Signed by a World ID verified buyer' + (signedDate ? ' · ' + signedDate : '') + '</span>';
+  } else if (p.status === 'ACCEPTED' || p.buyerSignature) {
+    action = renderSelfieCheckAction(p, '🪪 Perform Selfie Check');
+    signingInfo = '<span class="my-proposals-signed">✓ Signed by a World ID verified buyer' + (signedDate ? ' · ' + signedDate : '') + '</span>';
+  } else {
+    action = '<span class="my-proposals-waiting">⏳ Waiting for a buyer to sign…</span>';
+  }
+
+  return `
+    <div class="proposal-item my-proposal-item">
+      <div class="proposal-item-header">
+        <span class="proposal-id">#${shortId}</span>
+        <span class="badge ${p.status === 'PENDING' ? 'badge-warning' : 'badge-success'}">${p.status}</span>
+      </div>
+      <div class="proposal-metrics">
+        <div class="metric-col"><span class="metric-label">Nominal</span><span class="metric-value">$${Number(p.amount).toLocaleString()}</span></div>
+        <div class="metric-col"><span class="metric-label">Required</span><span class="metric-value">$${Number(p.requiredAmount).toLocaleString()}</span></div>
+        <div class="metric-col"><span class="metric-label">Duration</span><span class="metric-value">${p.returnDateInDays}d</span></div>
+        <div class="metric-col"><span class="metric-label">APY</span><span class="metric-value apy">${p.apy}%</span></div>
+      </div>
+      ${renderDebtDocumentSummary(p.debtDocument)}
+      <div class="proposal-item-actions">
+        ${signingInfo}
+        ${action}
+      </div>
+    </div>
+  `;
+}
+
+async function startSelfieCheck() {
+  const proposalId = selfieState.proposalId;
+  if (!proposalId) return;
+
+  const appIdInput = document.getElementById('selfieAppIdInput');
+  const appId = appIdInput.value.trim();
+  if (!appId || !appId.startsWith('app_')) {
+    setSelfieStatus('Enter a valid World App ID (pk), e.g. app_…', true);
+    return;
+  }
+  localStorage.setItem('factoraWorldAppId', appId);
+
+  // Optional RP signing key (private key) pasted by the user on the UI.
+  // When left empty the backend uses its configured WORLD_RP_SIGNING_KEY.
+  const signingKeyInput = document.getElementById('selfieSigningKeyInput');
+  const signingKey = signingKeyInput.value.trim();
+  if (signingKey && !/^0x[0-9a-fA-F]{64}$/.test(signingKey)) {
+    setSelfieStatus('The RP signing key must be a 0x-prefixed 32-byte hex string (0x + 64 hex chars).', true);
+    return;
+  }
+  if (signingKey) localStorage.setItem('factoraWorldSigningKey', signingKey);
+
+  const btn = document.getElementById('selfieStartBtn');
+  const spinner = document.getElementById('selfieSpinner');
+  btn.disabled = true;
+  spinner.classList.remove('hidden');
+  document.getElementById('selfieResultBox').classList.add('hidden');
+
+  try {
+    // ① Signed RP context from our backend — binds this Selfie Check request
+    //    to this proposal and cannot be replayed or reused after expiry.
+    setSelfieStatus('① Requesting signed RP context from backend…');
+    const rpRes = await fetch('/api/world/rp-signature', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(signingKey ? { proposalId, signingKey } : { proposalId }),
+    });
+    if (!rpRes.ok) throw new Error('RP signature failed: ' + (await rpRes.text()));
+    const rp = await rpRes.json();
+
+    // ② Real IDKit core request, staging environment, Selfie Check preset.
+    setSelfieStatus('② Preparing World ID request (staging)…');
+    const { IDKit, selfieCheckLegacy } = await import(
+      'https://cdn.jsdelivr.net/npm/@worldcoin/idkit-core@4/+esm'
+    );
+
+    const request = await IDKit.request({
+      app_id: appId,
+      action: 'mandatory-selfie-check',
+      rp_context: {
+        rp_id: rp.rp_id,
+        nonce: rp.nonce,
+        created_at: rp.created_at,
+        expires_at: rp.expires_at,
+        signature: rp.signature,
+      },
+      allow_legacy_proofs: true,
+      environment: 'staging',
+    }).preset(selfieCheckLegacy({ signal: proposalId }));
+
+    // ③ Hand off to the World App / Simulator (deep link / QR).
+    const uri = request.connectorURI;
+    if (!uri) throw new Error('No connectorURI returned — check the App ID (pk) and RP configuration.');
+    document.getElementById('selfieConnectorUri').textContent = uri;
+    document.getElementById('selfieConnectorBox').classList.remove('hidden');
+    setSelfieStatus('③ Complete the flow in the World App / Simulator. Waiting…');
+
+    const completion = await request.pollUntilCompletion({ pollInterval: 2000, timeout: 180000 });
+    if (!completion.success) {
+      throw new Error('Selfie Check failed: ' + (completion.error || 'unknown'));
+    }
+
+    // ④ Server-side verification against the World verify API.
+    setSelfieStatus('④ Proof received — verifying with World…');
+    const verifyRes = await fetch('/api/world/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ proposalId, proof: completion.result, role: selfieState.mode }),
+    });
+    const verifyData = await verifyRes.json();
+    if (!verifyRes.ok) {
+      throw new Error(verifyData.message || verifyData.error || 'Verification rejected (HTTP ' + verifyRes.status + ')');
+    }
+
+    const isBuyer = selfieState.mode === 'buyer';
+    const resultBox = document.getElementById('selfieResultBox');
+    if (isBuyer) {
+      resultBox.innerHTML =
+        '✓ <strong>Selfie check successful — proposal signed!</strong> ' +
+        'The listing is now ACCEPTED and the seller can verify their identity.';
+    } else {
+      const nullifier = String(verifyData.selfieCheck?.nullifier || '');
+      resultBox.innerHTML =
+        '✓ <strong>Selfie check successful</strong> — proposer verified' +
+        (nullifier ? ` <small>(nullifier ${escapeHtml(nullifier.substring(0, 12))}…)</small>` : '');
+    }
+    resultBox.classList.remove('hidden');
+    setSelfieStatus(
+      isBuyer
+        ? 'Done. Your signature is recorded and the seller has been notified.'
+        : 'Done. This proposal is now marked Selfie Verified.',
+      false,
+    );
+    if (isBuyer) {
+      markSignedEverywhere(proposalId);
+    } else {
+      markSelfieVerifiedEverywhere(proposalId, verifyData.selfieCheck?.nullifier);
+    }
+    await loadProposals();
+    await loadMyProposals({ silent: true });
+  } catch (err) {
+    setSelfieStatus('⚠️ ' + (err && err.message ? err.message : String(err)), true);
+  } finally {
+    btn.disabled = false;
+    spinner.classList.add('hidden');
+  }
 }
 
 // ---------- x402 helpers ----------
@@ -622,6 +945,9 @@ function renderMatchedProposal(proposal) {
         <div class="metric-col"><span class="metric-label">APY</span><span class="metric-value apy">${proposal.apy}%</span></div>
       </div>
       ${renderDebtDocumentSummary(proposal.debtDocument)}
+      <div class="proposal-item-actions">
+        ${renderBuyAction(proposal)}
+      </div>
     </div>
   `;
 }
@@ -785,6 +1111,9 @@ function renderEvaluationCard(item, index, marketBenchmark) {
         <p>${escapeHtml(ev.recommendation)}</p>
       </div>
       ${renderDebtAnalysis(ev.debtAnalysis)}
+      <div class="proposal-item-actions">
+        ${renderBuyAction(p)}
+      </div>
     </div>
   `;
 }
@@ -1096,6 +1425,12 @@ document.addEventListener('DOMContentLoaded', () => {
   checkServerHealth();
   loadProposals();
   checkAgentStatus();
+  // Restore the seller's public key and preload "My Proposals" if we have one.
+  const savedProposerKey = localStorage.getItem('factoraProposerKey');
+  if (savedProposerKey) {
+    document.getElementById('myProposalsKeyInput').value = savedProposerKey;
+    loadMyProposals();
+  }
   setInterval(checkServerHealth, 10000);
   // Self-heal the status badges when the tab regains focus or connectivity.
   window.addEventListener('focus', () => { checkServerHealth(); checkAgentStatus(); });

@@ -1415,3 +1415,179 @@ input:focus,
 .pipeline-step.error .p-icon { border-color: #f87171; color: #f87171; }
 .pipeline-step.error .p-detail { color: #f87171; }
 @keyframes pipeline-spin { to { transform: rotate(360deg); } }
+
+/* ── World ID Selfie Check modal ─────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 8, 16, 0.72);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.modal-card {
+  width: 100%;
+  max-width: 560px;
+  max-height: 90vh;
+  overflow-y: auto;
+  background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), var(--shadow-glow);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.modal-header h3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.15rem;
+}
+
+.modal-icon {
+  font-size: 1.3rem;
+}
+
+.text-input {
+  width: 100%;
+  padding: 10px 12px;
+  background: rgba(9, 13, 22, 0.6);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+}
+
+.text-input:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25);
+}
+
+.field-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.selfie-connector {
+  background: rgba(249, 115, 22, 0.06);
+  border: 1px dashed rgba(245, 158, 11, 0.45);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.selfie-connector-label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.selfie-connector .code-block {
+  word-break: break-all;
+  white-space: normal;
+  font-size: 0.78rem;
+}
+
+.selfie-connector-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.selfie-status {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  border-left: 3px solid var(--accent-primary);
+  padding: 8px 12px;
+  background: rgba(99, 102, 241, 0.06);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.selfie-status-error {
+  border-left-color: var(--accent-rose);
+  background: rgba(244, 63, 94, 0.08);
+  color: var(--text-main);
+}
+
+.modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.proposal-item-actions {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 0.8rem;
+}
+
+.selfie-badge {
+  font-size: 0.78rem;
+}
+
+/* ── My Proposals (seller view) ──────────────────────────────────────────── */
+#myProposalsSection {
+  margin-top: 4px;
+}
+
+.my-proposals-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.my-proposals-key-group {
+  flex: 1;
+  min-width: 260px;
+  margin-bottom: 0;
+}
+
+.my-proposal-item {
+  margin-bottom: 12px;
+}
+
+.my-proposal-item:last-child {
+  margin-bottom: 0;
+}
+
+.my-proposals-waiting {
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.my-proposals-signed {
+  font-size: 0.82rem;
+  color: var(--accent-emerald);
+  font-weight: 600;
+}
