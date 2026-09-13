@@ -360,7 +360,9 @@ export class McpMarketService {
 
   private isList(type: unknown): boolean {
     const record = this.asRecord(type);
-    return record?.kind === 'LIST' || this.isList(record?.ofType);
+    if (!record) return false;
+    if (record.kind === 'LIST') return true;
+    return this.isList(record.ofType);
   }
 
   private namedType(type: unknown): string | undefined {

@@ -13,7 +13,7 @@ const log = createLogger("agent-api");
 export const agentRouter = Router();
 
 // The agent may only pay for our own paid endpoints.
-const PAID_PATHS: readonly string[] = ["/api/proposals", "/api/buyer/smart-report"];
+const PAID_PATHS: readonly string[] = ["/api/proposals", "/api/buyer/smart-report", "/api/graph/insights"];
 
 function describeError(error: unknown): string {
     return error instanceof Error ? error.message : String(error);

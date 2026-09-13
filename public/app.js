@@ -28,6 +28,9 @@ function switchTab(tabId) {
   } else if (tabId === 'x402') {
     document.getElementById('tabBtnX402').classList.add('active');
     document.getElementById('tabX402').classList.add('active');
+  } else if (tabId === 'graph') {
+    document.getElementById('tabBtnGraph').classList.add('active');
+    document.getElementById('tabGraph').classList.add('active');
   }
 }
 
@@ -1137,6 +1140,25 @@ function renderDebtAnalysis(analysis) {
   `;
 }
 
+/**
+ * Live market stats for the report panel, derived from the Messari benchmarks.
+ * Returns null when the feed carried no benchmark data (nothing is fabricated).
+ */
+function marketApyStats(mb) {
+  const benchmarks = Object.values(mb?.messari?.benchmarks ?? {});
+  if (!benchmarks.length) return null;
+  const best = benchmarks.reduce((a, b) => (b.maxSupplyApy > a.maxSupplyApy ? b : a));
+  if (!(best.maxSupplyApy > 0)) return null;
+  const maxApyPct = (best.maxSupplyApy * 100).toFixed(2);
+  const avgVsBestPct = Math.max(1, Math.min(100, Math.round((mb.averageMarketApy / 100 / best.maxSupplyApy) * 100)));
+  return {
+    maxApyPct,
+    topMarket: best.topMarket,
+    avgVsBestPct,
+    marketsTracked: mb?.messari?.detailedRates?.length ?? 0,
+  };
+}
+
 function renderSmartReport(container, report) {
   const mb = report.marketBenchmark;
   const scores = report.results.map((r) => Number(r.evaluation.fitScore) || 0);
@@ -1147,6 +1169,7 @@ function renderSmartReport(container, report) {
   const high = report.results.filter((r) => r.evaluation.riskLevel === 'HIGH').length;
   const total = report.results.length || 1;
   const pct = (n) => (n / total) * 100;
+  const market = marketApyStats(mb);
 
   container.className = 'smart-report-container';
   container.innerHTML = `
@@ -1183,12 +1206,15 @@ function renderSmartReport(container, report) {
       <div class="report-panel">
         <div class="report-kicker"><span>◌</span> Market context</div>
         <div class="benchmark-grid">
-          <div class="benchmark-item"><span>Market APY</span> <strong>${mb.averageMarketApy}%</strong></div>
-          <div class="benchmark-item"><span>Default rate</span> <strong>${(mb.benchmarkDefaultRate * 100).toFixed(2)}%</strong></div>
-          <div class="benchmark-item"><span>Liquidity index</span> <strong>${mb.liquidityIndex}<small>/100</small></strong></div>
+          <div class="benchmark-item" title="AI-assessed median DeFi hurdle rate (from the live graph data)"><span>Market APY</span> <strong>${mb.averageMarketApy}%</strong></div>
+          <div class="benchmark-item" ${market ? `title="Best market: ${escapeHtml(market.topMarket)}"` : ''}><span>Max APY</span> <strong>${market ? market.maxApyPct + '%' : '—'}</strong></div>
+          <div class="benchmark-item" ${market ? `title="Live Messari lending markets above the $1M TVL floor"` : ''}><span>Markets tracked</span> <strong>${market ? market.marketsTracked : '—'}</strong></div>
         </div>
-        <div class="liquidity-meter"><div class="liquidity-fill" data-target="${mb.liquidityIndex}"></div></div>
-        <div class="liquidity-meta"><span>Capital depth</span><span>${mb.liquidityIndex}/100</span></div>
+        ${market ? `
+        <div class="liquidity-meter"><div class="liquidity-fill" data-target="${market.avgVsBestPct}"></div></div>
+        <div class="liquidity-meta"><span>Market average vs best yield</span><span>${market.avgVsBestPct}%</span></div>
+        ` : ''}
+        ${report.marketReview ? `<p class="market-review"><span class="market-review-kicker">✦ AI market review</span>${escapeHtml(report.marketReview)}</p>` : ''}
       </div>
       <div class="report-panel">
         <div class="report-kicker"><span>◔</span> Risk distribution</div>
@@ -1260,7 +1286,12 @@ function buildReportSummaryText(report) {
   const lines = [];
   lines.push(`Factora AI Smart Report — ${new Date(report.generatedAt).toLocaleString()}`);
   lines.push(`Matches evaluated: ${report.count}`);
-  lines.push(`Market: APY ${mb.averageMarketApy}% | default rate ${(mb.benchmarkDefaultRate * 100).toFixed(2)}% | liquidity ${mb.liquidityIndex}/100`);
+  const marketLine = marketApyStats(mb);
+  lines.push(
+    `Market: APY ${mb.averageMarketApy}%` +
+      (marketLine ? ` | max APY ${marketLine.maxApyPct}% (${marketLine.topMarket}) | ${marketLine.marketsTracked} live markets tracked` : ''),
+  );
+  if (report.marketReview) lines.push(`AI market review: ${report.marketReview}`);
   lines.push('');
   lines.push(`Verdict: ${report.overallSummary}`);
   report.results.forEach((item, i) => {
@@ -1418,6 +1449,197 @@ async function handleSmartReport() {
   } finally {
     button.disabled = false;
   }
+}
+
+// ---------- Graph Market Insights (standalone paid analytics) ----------
+
+async function handleGraphInsights() {
+  const btn = document.getElementById('graphInsightsBtn');
+  const btnText = document.getElementById('graphInsightsBtnText');
+  const spinner = document.getElementById('graphInsightsSpinner');
+  const statusEl = document.getElementById('graphInsightsStatus');
+  const paymentEl = document.getElementById('graphInsightsPayment');
+
+  btn.disabled = true;
+  btnText.textContent = 'Processing…';
+  spinner.classList.remove('hidden');
+  statusEl.classList.add('hidden');
+  paymentEl.classList.add('hidden');
+
+  const finishUi = () => {
+    btn.disabled = false;
+    btnText.textContent = '⚡ Buy & Analyze Live Markets';
+    spinner.classList.add('hidden');
+  };
+
+  try {
+    // First attempt: unpaid → expect the x402 402 challenge.
+    const res = await fetch('/api/graph/insights', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+
+    if (res.status === 402) {
+      const invoice = decodePaymentRequired(res);
+      pendingPayments.graph = {
+        invoice,
+        onPay: async () => {
+          try {
+            const final = await runAgentPaymentStream('/api/graph/insights', {}, (evt) => {
+              statusEl.classList.remove('hidden');
+              statusEl.textContent = `⏳ ${evt.detail || evt.step}`;
+            });
+            paymentEl.classList.add('hidden');
+            renderGraphInsights(final.data, final.settlement);
+          } catch (err) {
+            statusEl.classList.remove('hidden');
+            statusEl.textContent = `⚠️ ${escapeHtml(err.message)}`;
+          } finally {
+            delete pendingPayments.graph;
+            finishUi();
+          }
+        }
+      };
+      paymentEl.innerHTML = renderPaymentPanelHtml('graph', 'Pay & Run Market Analysis');
+      paymentEl.classList.remove('hidden');
+      return;
+    }
+
+    if (!res.ok) {
+      let msg = 'Graph insights failed (HTTP ' + res.status + ')';
+      try { const j = await res.json(); if (j.error) msg = j.error; } catch { /* non-JSON */ }
+      throw new Error(msg);
+    }
+
+    // Unprotected dev mode (no x402 route configured) — render directly.
+    renderGraphInsights(await res.json(), null);
+  } catch (err) {
+    statusEl.classList.remove('hidden');
+    statusEl.textContent = `⚠️ ${escapeHtml(err.message)}`;
+  } finally {
+    finishUi();
+  }
+}
+
+function renderGraphInsights(data, settlement) {
+  const outputEl = document.getElementById('graphInsightsOutput');
+  const statusEl = document.getElementById('graphInsightsStatus');
+  const m = data.market || {};
+  const about = data.about || {};
+  const benchmarks = m.benchmarks || [];
+  const best = benchmarks.reduce(
+    (a, b) => (b.maxSupplyApyPct > a.maxSupplyApyPct ? b : a),
+    { maxSupplyApyPct: -1, topMarket: '—', symbol: '—' }
+  );
+  const avgVsBestPct = best.maxSupplyApyPct > 0
+    ? Math.max(1, Math.min(100, Math.round((m.unifiedApyPct / best.maxSupplyApyPct) * 100)))
+    : 0;
+
+  const benchmarkRows = benchmarks.map((b) => `
+    <tr>
+      <td><strong>${escapeHtml(b.symbol)}</strong></td>
+      <td>${b.averageSupplyApyPct}%</td>
+      <td>${b.minSupplyApyPct}%</td>
+      <td>${b.maxSupplyApyPct}% <small class="rates-dim">(${escapeHtml(b.topMarket)})</small></td>
+      <td>${b.marketsCount}</td>
+    </tr>`).join('');
+
+  const rateRows = (m.detailedRates || []).map((r) => `
+    <tr>
+      <td>${escapeHtml(r.protocol)}</td>
+      <td>${escapeHtml(r.chain)}</td>
+      <td>${escapeHtml(r.symbol)}</td>
+      <td class="rates-apy">${r.supplyApyPct}%</td>
+      <td>${r.borrowApyPct}%</td>
+      <td>$${Math.round(r.totalValueLockedUSD).toLocaleString()}</td>
+    </tr>`).join('');
+
+  const mcpRows = (m.mcpOpportunities || []).map((o) => `
+    <tr>
+      <td>${escapeHtml(o.protocol)}</td>
+      <td>${escapeHtml(o.chain)}</td>
+      <td>${escapeHtml(o.symbol)}</td>
+      <td class="rates-apy">${o.supplyApyPct}%</td>
+      <td>$${Math.round(o.totalValueLockedUSD).toLocaleString()}</td>
+      <td>${escapeHtml(o.category)} / ${escapeHtml(o.tier)}</td>
+    </tr>`).join('');
+
+  outputEl.innerHTML = `
+    <div class="report-stat-strip">
+      <div class="report-stat tone-cyan">
+        <span class="stat-label">Market APY (AI median)</span>
+        <span class="report-stat-value">${m.unifiedApyPct}%</span>
+        <span class="report-stat-sub">AI-assessed DeFi hurdle rate</span>
+      </div>
+      <div class="report-stat">
+        <span class="stat-label">Raw average</span>
+        <span class="report-stat-value">${m.averageApyPct ?? '—'}%</span>
+        <span class="report-stat-sub">arithmetic mean, all markets</span>
+      </div>
+      <div class="report-stat tone-emerald">
+        <span class="stat-label">Max APY</span>
+        <span class="report-stat-value">${best.maxSupplyApyPct > 0 ? best.maxSupplyApyPct + '%' : '—'}</span>
+        <span class="report-stat-sub">${best.maxSupplyApyPct > 0 ? escapeHtml(`${best.symbol} · ${best.topMarket}`) : 'no data'}</span>
+      </div>
+      <div class="report-stat">
+        <span class="stat-label">Markets tracked</span>
+        <span class="report-stat-value">${m.marketsTracked ?? '—'}</span>
+        <span class="report-stat-sub">live subgraph markets</span>
+      </div>
+      <div class="report-stat">
+        <span class="stat-label">MCP opportunities</span>
+        <span class="report-stat-value">${(m.mcpOpportunities || []).length}</span>
+        <span class="report-stat-sub">discovered beyond tracked set</span>
+      </div>
+    </div>
+
+    ${data.review ? `<div class="verdict-card"><span class="verdict-quote-mark">”</span>
+      <div class="report-kicker"><span>✦</span> AI market review</div>
+      <p>${escapeHtml(data.review)}</p></div>` : ''}
+
+    <div class="report-panels">
+      <div class="report-panel">
+        <div class="report-kicker"><span>◔</span> Stablecoin benchmarks</div>
+        <table class="rates-table">
+          <thead><tr><th>Asset</th><th>Avg APY</th><th>Min</th><th>Max</th><th>Markets</th></tr></thead>
+          <tbody>${benchmarkRows || '<tr><td colspan="5">—</td></tr>'}</tbody>
+        </table>
+        <div class="liquidity-meter"><div class="liquidity-fill" data-target="${avgVsBestPct}"></div></div>
+        <div class="liquidity-meta"><span>Unified average vs best market</span><span>${avgVsBestPct}%</span></div>
+      </div>
+      <div class="report-panel">
+        <div class="report-kicker"><span>◎</span> Tracked markets (The Graph)</div>
+        <table class="rates-table">
+          <thead><tr><th>Protocol</th><th>Chain</th><th>Asset</th><th>Supply</th><th>Borrow</th><th>TVL</th></tr></thead>
+          <tbody>${rateRows || '<tr><td colspan="6">—</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+
+    ${(m.mcpOpportunities || []).length ? `
+    <div class="report-panel">
+      <div class="report-kicker"><span>✧</span> MCP-discovered opportunities (additive)</div>
+      <table class="rates-table">
+        <thead><tr><th>Protocol</th><th>Chain</th><th>Asset</th><th>Supply APY</th><th>TVL</th><th>Type</th></tr></thead>
+        <tbody>${mcpRows}</tbody>
+      </table>
+    </div>` : ''}
+
+    <div class="liquidity-meta" style="margin-top: 12px;">
+      <span>${escapeHtml(about.product || 'Factora Graph Market Insights')} · ${escapeHtml(m.dataSource || '')} · ${data.latencyMs ?? '?'}ms</span>
+      <span>generated ${new Date(data.generatedAt).toLocaleString()}</span>
+    </div>
+  `;
+
+  const txLine = settlementText(settlement);
+  statusEl.classList.remove('hidden');
+  statusEl.textContent = `✓ Report generated${txLine ? ' · ' + txLine : ''}`;
+
+  outputEl.querySelectorAll('.liquidity-fill').forEach((bar) => {
+    bar.style.width = Math.min(100, Number(bar.dataset.target) || 0) + '%';
+  });
+  outputEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // Init

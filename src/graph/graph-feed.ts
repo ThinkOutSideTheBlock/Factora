@@ -6,6 +6,7 @@ import {
 } from "./graph-feed/graph-feed.types.js";
 import { getStandardizedLendingBenchmarks } from "./graph-feed/messari.service.js";
 import { mcpMarketService } from "./graph-feed/mcp-market.service.js";
+import { graphMcpClient } from "./graph-feed/graph-mcp.client.js";
 
 export interface GraphMarketData {
     timestamp: string;
@@ -50,22 +51,38 @@ export function createGraphFeed(input: GraphFeedInput): GraphMarketData {
 
 /** Fetches the live Messari and additive MCP datasets and unifies them. */
 export async function getGraphFeed(): Promise<GraphMarketData> {
+    console.log("messari");
+
     const messari = await getStandardizedLendingBenchmarks();
+    console.log("mcp");
     const mcp = await mcpMarketService.getDynamicYieldOpportunities({
         riskProfile: "low",
+        minTvlUsd: 1_000_000,
+        protocolKeywords: [
+            "aave",
+            "compound",
+            "spark",
+            "vault",
+            "staking",
+            "yield",
+            "liquidity pool",
+        ],
         excludeMarkets: messari.detailedRates.map((rate) => ({
             protocol: rate.protocol,
             chain: rate.chain,
             symbol: rate.symbol,
         })),
     });
-
     return createGraphFeed({ messari, mcp });
 }
 
-async function main() {
-    const res = await getGraphFeed();
-    console.log(res);
-}
+// async function main() {
+//     const res = await getGraphFeed();
 
-main();
+//     console.dir(res, {
+//         depth: null,
+//         colors: true,
+//     });
+// }
+
+// main();

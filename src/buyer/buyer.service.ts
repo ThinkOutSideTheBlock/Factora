@@ -2,6 +2,7 @@ import { Proposal } from "../proposal/proposal.model.js";
 import { getAllProposals } from "../proposal/proposal.storage.js";
 import { getGraphFeed } from "../graph/graph-feed.js";
 import { evaluateProposalsWithAI } from "../underwriter/underwriter.agent.js";
+import { generateMarketReview } from "../underwriter/market-review.js";
 import {
     BuyerMatchResponse,
     BuyerSearchRequest,
@@ -100,10 +101,15 @@ export async function generateSmartReport(
         log.info(
             "Smart report: no candidates passed the hard filter — returning empty report (no LLM call)",
         );
+        const emptyReview = await generateMarketReview(marketBenchmark);
+        if (emptyReview.mediumApyPct != null) {
+            marketBenchmark.averageMarketApy = emptyReview.mediumApyPct;
+        }
         return {
             count: 0,
             overallSummary:
                 "No pending proposals match the buyer requirements.",
+            marketReview: emptyReview.review,
             marketBenchmark,
             results: [],
             pricing: pricingInfo,
@@ -111,13 +117,28 @@ export async function generateSmartReport(
         };
     }
 
-    // Stage 2: AI Underwriter Evaluation (metered)
-    const { analysis: aiAnalysis, usage } = await evaluateProposalsWithAI(
-        filteredCandidates,
-        criteria,
-        marketBenchmark,
-        criteria.userMessage,
-    );
+    // Stage 2: AI Underwriter Evaluation (metered) + AI market review. Both are
+    // LLM calls against the same graph feed; they run in parallel so the
+    // review adds no latency to the paid report.
+    const [underwriterResult, reviewResult] = await Promise.all([
+        evaluateProposalsWithAI(
+            filteredCandidates,
+            criteria,
+            marketBenchmark,
+            criteria.userMessage,
+        ),
+        generateMarketReview(marketBenchmark),
+    ]);
+    const { analysis: aiAnalysis, usage } = underwriterResult;
+
+    // The AI's "medium" (median-style) hurdle rate replaces the arithmetic
+    // average, which low-yield MCP rows drag down — the displayed Market APY
+    // must be a realistic capital-cost signal.
+    if (reviewResult.mediumApyPct != null) {
+        marketBenchmark.averageMarketApy = reviewResult.mediumApyPct;
+    }
+    const marketReview = reviewResult.review;
+
     const evalMap = new Map(
         aiAnalysis.evaluations.map((e) => [e.proposalId, e]),
     );
@@ -175,6 +196,7 @@ export async function generateSmartReport(
     return {
         count: ranked.length,
         overallSummary: aiAnalysis.overallSummary,
+        marketReview,
         marketBenchmark,
         results: ranked,
         pricing: pricingInfo,

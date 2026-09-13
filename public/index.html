@@ -41,6 +41,9 @@
       <button class="tab-btn" id="tabBtnX402" onclick="switchTab('x402')">
         <span class="tab-icon">🛡️</span> x402 Payment Gate
       </button>
+      <button class="tab-btn" id="tabBtnGraph" onclick="switchTab('graph')">
+        <span class="tab-icon">📊</span> Graph Market Insights
+      </button>
     </nav>
 
     <!-- TAB 1: Proposals -->
@@ -343,6 +346,37 @@
       </div>
     </main>
 
+    <!-- TAB 4: Graph Market Insights (standalone paid analytics) -->
+    <main id="tabGraph" class="tab-content">
+      <div class="card glass-panel">
+        <div class="card-header">
+          <div>
+            <h2>Graph Market Insights — On-Chain Analytics</h2>
+            <p class="card-desc">Live DeFi stablecoin lending intelligence queried from The Graph (Messari-standardized subgraphs + dynamic Subgraph MCP discovery), with an AI market review. Sold separately via x402 — any external agent can pay per call and reuse the JSON for its own debt analytics.</p>
+          </div>
+          <span class="badge badge-primary">x402 protected</span>
+        </div>
+
+        <div class="graph-insights-controls">
+          <button class="btn btn-primary" id="graphInsightsBtn" onclick="handleGraphInsights()">
+            <span id="graphInsightsBtnText">⚡ Buy &amp; Analyze Live Markets</span>
+            <span id="graphInsightsSpinner" class="spinner hidden"></span>
+          </button>
+          <span class="field-hint">POST /api/graph/insights &middot; fixed price &middot; settled in HBAR via the Blocky402 facilitator</span>
+        </div>
+
+        <div id="graphInsightsPayment" class="hidden"></div>
+        <div id="graphInsightsStatus" class="alert-box hidden"></div>
+
+        <section id="graphInsightsOutput" class="graph-insights-output">
+          <div class="empty-state">
+            <span>📊</span>
+            <p>Purchase a report to see live on-chain APY benchmarks, discovered markets, and the AI review.</p>
+          </div>
+        </section>
+      </div>
+    </main>
+
     <!-- Footer -->
     <footer class="footer">
       <p>Factora / ClaimFlow &bull; Local Testing Environment &bull; Port: 3000</p>
@@ -394,6 +428,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=6"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>

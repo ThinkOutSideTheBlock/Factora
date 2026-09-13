@@ -147,9 +147,9 @@ describe("getStandardizedLendingBenchmarks", () => {
                 kind: "markets",
                 markets: stablecoins("Aave", "3.63"),
             },
-            "Morpho Blue|Ethereum": {
+            "Spark|Ethereum": {
                 kind: "markets",
-                markets: stablecoins("Morpho", String(8e25)),
+                markets: stablecoins("Spark", String(8e25)),
             },
         });
 

@@ -32,6 +32,17 @@ export const PROPOSAL_FIXED_PRICE: AssetAmount = {
     amount: process.env.PROPOSAL_PRICE_TINYBAR ?? "100000",
 };
 
+/**
+ * Fixed price for the standalone graph-analytics endpoint
+ * (POST /api/graph/insights): live DeFi benchmarks + MCP opportunities + AI
+ * market review, sold independently of the buyer/seller flows. A flat fee —
+ * the payload shape is constant regardless of request content.
+ */
+export const GRAPH_INSIGHTS_PRICE: AssetAmount = {
+    asset: HBAR_ASSET,
+    amount: process.env.GRAPH_INSIGHTS_PRICE_TINYBAR ?? "50000",
+};
+
 export interface SmartReportPricingConfig {
     /** Flat fee charged regardless of usage, in tinybars. */
     baseFeeTinybars: number;

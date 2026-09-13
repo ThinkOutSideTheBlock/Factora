@@ -38,6 +38,16 @@ const ASSET_ALIASES: Record<string, (typeof ASSET_SYMBOLS)[number]> = {
 const TARGET_TIMEOUT_MS = 30_000;
 const TARGET_RETRY_BACKOFF_MS = 250;
 
+/**
+ * Supply APYs above this level are treated as subgraph data anomalies rather
+ * than sustainable hurdle rates and are excluded from the benchmark set.
+ * Verified live Sep 2026: the highest genuine tracked market (Moonwell USDC on
+ * Base) sits at ~14.5%, while the Euler USDT subgraph reports a 69.4% lend /
+ * 81% borrow rate on a $19M pool — a reward-inflated or mis-scaled snapshot
+ * that would otherwise poison the average, max, and unified APY.
+ */
+const MAX_PLAUSIBLE_SUPPLY_APY = 0.3;
+
 export async function getStandardizedLendingBenchmarks(
     apiKey = process.env.GRAPH_API_KEY ?? "",
 ): Promise<MultiAssetBenchmarkReport> {
@@ -177,6 +187,15 @@ function collectMarketRate(
         },
         { supplyApy: 0, borrowApy: 0 },
     );
+
+    // Data-anomaly gate: an implausible lend rate means the subgraph snapshot
+    // is reward-inflated or mis-scaled — the whole market row is unreliable.
+    if (rates.supplyApy > MAX_PLAUSIBLE_SUPPLY_APY) {
+        console.warn(
+            `[newgraph:messari] excluded ${target.protocol} on ${target.chain} ${symbol}: supply APY ${(rates.supplyApy * 100).toFixed(2)}% exceeds the ${(MAX_PLAUSIBLE_SUPPLY_APY * 100).toFixed(0)}% plausibility gate`,
+        );
+        return [];
+    }
 
     return [
         {

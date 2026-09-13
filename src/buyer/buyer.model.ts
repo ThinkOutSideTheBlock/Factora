@@ -103,6 +103,8 @@ export type PublicProposal = Omit<Proposal, "underwritingReview"> & {
 export interface BuyerSearchResponse {
     count: number;
     overallSummary: string;
+    /** AI-generated factoring commentary on the live graph market data (null when unavailable). */
+    marketReview: string | null;
     marketBenchmark: GraphMarketData;
     results: MatchmakingResultItem[];
 }

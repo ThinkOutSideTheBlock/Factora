@@ -8,7 +8,7 @@
 import { HTTPFacilitatorClient, x402ResourceServer, type RoutesConfig } from '@x402/core/server';
 import { ExactHederaScheme } from '@x402/hedera/exact/server';
 import type { Network } from '@x402/core/types';
-import { PROPOSAL_FIXED_PRICE, smartReportPrice } from './pricing.js';
+import { GRAPH_INSIGHTS_PRICE, PROPOSAL_FIXED_PRICE, smartReportPrice } from './pricing.js';
 import { createLogger } from '../common/logger.js';
 
 const log = createLogger('x402');
@@ -146,6 +146,13 @@ export function buildX402Routes(): RoutesConfig {
     payTo,
   };
 
+  const graphInsightsHederaAccept = {
+    scheme: 'exact' as const,
+    price: GRAPH_INSIGHTS_PRICE,
+    network,
+    payTo,
+  };
+
   return {
     'POST /api/proposals': {
       accepts: [fixedHederaAccept],
@@ -155,6 +162,15 @@ export function buildX402Routes(): RoutesConfig {
     'POST /api/buyer/smart-report': {
       accepts: [meteredHederaAccept],
       description: 'AI Underwriter smart report — priced per declared token budget',
+      mimeType: 'application/json',
+    },
+    'POST /api/graph/insights': {
+      accepts: [graphInsightsHederaAccept],
+      description:
+        'On-chain market intelligence from The Graph (live subgraph queries via MCP + gateway): ' +
+        'DeFi stablecoin lending benchmarks (avg/min/max APY per asset, top markets), dynamically ' +
+        'discovered MCP opportunities, and an AI market review with factoring hurdle-rate guidance. ' +
+        'Standalone JSON — usable by any agent for debt analytics and capital-cost decisions.',
       mimeType: 'application/json',
     },
   };
