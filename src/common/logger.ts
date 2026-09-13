@@ -7,6 +7,8 @@
  * Scope comes from createLogger('llm'). Level from LOG_LEVEL env
  * (debug | info | warn | error; default info). Colors on TTY only.
  */
+import { pushLogEntry } from "./logring.js";
+
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 const LEVELS: Record<LogLevel, number> = { debug: 10, info: 20, warn: 30, error: 40 };
@@ -46,6 +48,8 @@ function emit(level: LogLevel, scope: string, message: string, meta?: unknown): 
     }
     const out = level === "error" ? console.error : level === "warn" ? console.warn : console.log;
     out(line);
+    // Mirror into the ring buffer so the Developer console can tail activity.
+    pushLogEntry(level, scope, message.replace(/\x1b\[[0-9;]*m/g, ""));
 }
 
 export interface Logger {

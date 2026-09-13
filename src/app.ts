@@ -9,6 +9,7 @@ import { agentRouter } from './agent/agent.controller.js';
 import { worldRouter } from './world/world.controller.js';
 import { graphRouter } from './graph/graph.controller.js';
 import { atsRouter } from './hedera/ats.controller.js';
+import { devLogsRouter } from './devtools/devlogs.controller.js';
 import { paymentMiddleware } from '@x402/express';
 import {
   buildX402Routes,
@@ -106,6 +107,7 @@ app.use('/api/agent', agentRouter);
 app.use('/api/graph', graphRouter); // Paid standalone graph analytics (x402)
 app.use('/api/world', worldRouter); // World ID Selfie Check (Beta) verification
 app.use('/api/ats', atsRouter); // ATS (factored-hedera sidecar) lifecycle test space
+app.use('/api/dev', devLogsRouter); // Developer console: live server log tail
 
 // Central error handler — logs the cause, returns clean JSON. Also converts
 // body-parser's HTML error pages (e.g. malformed JSON) into API errors.

@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Factora — Institutional Debt & Receivables Marketplace</title>
+  <meta name="description" content="Factora is a marketplace for financing invoices and trade receivables, with on-chain settlement on Hedera." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,300;8..60,400;8..60,500;8..60,600&family=Inter:wght@400;450;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=5" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230B0F1A'/%3E%3Cpath d='M10 24V8h13v4h-8.4v3.2H22v4h-7.4V24z' fill='%23D4AF6A'/%3E%3C/svg%3E" />
+</head>
+<body>
+
+  <!-- ══ Top bar ══ -->
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#markets" data-nav="markets">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#0B0F1A"/><path d="M10 24V8h13v4h-8.4v3.2H22v4h-7.4V24z" fill="currentColor"/></svg>
+        <span class="brand-word">FACTORA</span>
+      </a>
+      <nav class="mainnav" aria-label="Primary">
+        <a href="#markets"      data-nav="markets"      class="navlink">Markets</a>
+        <a href="#invest"       data-nav="invest"       class="navlink">Invest</a>
+        <a href="#raise"        data-nav="raise"        class="navlink">Raise&nbsp;Capital</a>
+        <a href="#settlement"   data-nav="settlement"   class="navlink">Settlement</a>
+        <a href="#intelligence" data-nav="intelligence" class="navlink">Intelligence</a>
+      </nav>
+      <div class="topbar-status">
+        <span class="net-pill" id="netPill" title="x402 settlement network"><span class="dot"></span><span id="netPillText">Hedera Testnet</span></span>
+        <span class="sys-pill" id="sysAgent" title="Payment agent wallet"><span class="dot"></span>Agent</span>
+        <span class="sys-pill" id="sysAts" title="ATS settlement service"><span class="dot"></span>ATS</span>
+        <span class="sys-pill" id="sysServer" title="Application server"><span class="dot"></span>API</span>
+      </div>
+    </div>
+  </header>
+
+  <main id="views">
+    <!-- ── MARKETS ── -->
+    <section class="view active" id="view-markets">
+      <div class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Private credit · trade receivables · settled on-chain</p>
+          <h1>Receivables financing,<br/><em>underwritten</em> by machine intelligence.</h1>
+          <p class="lede">Factora connects companies holding unpaid invoices with institutional capital.
+          Every listing is underwritten by an AI credit desk, verified with proof-of-personhood,
+          and settled on Hedera through an x402 payment layer.</p>
+          <div class="hero-actions">
+            <a class="btn btn-gold" href="#invest" data-nav="invest">Explore investment opportunities</a>
+            <a class="btn btn-ghost" href="#raise" data-nav="raise">Raise capital against receivables</a>
+          </div>
+        </div>
+        <div class="hero-stats">
+          <div class="statblock"><span class="stat-label">Live listings</span><span class="stat-value" id="statListings">—</span><span class="stat-sub">open on the order book</span></div>
+          <div class="statblock"><span class="stat-label">Nominal outstanding</span><span class="stat-value" id="statVolume">—</span><span class="stat-sub">aggregate face value</span></div>
+          <div class="statblock"><span class="stat-label">Median APY</span><span class="stat-value" id="statApy">—</span><span class="stat-sub">annualized, discounted</span></div>
+          <div class="statblock"><span class="stat-label">Avg. term</span><span class="stat-value" id="statTerm">—</span><span class="stat-sub">invoice to maturity</span></div>
+        </div>
+      </div>
+
+      <div class="section-head">
+        <div><p class="eyebrow">Order book</p><h2>Listed receivables</h2></div>
+        <div class="section-tools">
+          <select id="poolStatusFilter" class="input input-select">
+            <option value="">All statuses</option>
+            <option value="PENDING">Awaiting investor</option>
+            <option value="ACCEPTED">Reserved / signed</option>
+          </select>
+          <button class="btn btn-ghost btn-sm" id="poolRefreshBtn">Refresh</button>
+        </div>
+      </div>
+      <div class="pool-grid" id="poolGrid">
+        <div class="placeholder" id="poolPlaceholder"><div class="spinner"></div><p>Loading listings…</p></div>
+      </div>
+
+      <div class="band">
+        <div class="band-inner">
+          <div>
+            <p class="eyebrow">Market intelligence</p>
+            <h3>Live DeFi yield benchmarks, fetched from The Graph and priced through x402.</h3>
+          </div>
+          <a class="btn btn-ghost" href="#intelligence" data-nav="intelligence">Open intelligence desk →</a>
+        </div>
+      </div>
+    </section>
+    <!-- ── INVEST ── -->
+    <section class="view" id="view-invest">
+      <div class="view-head">
+        <p class="eyebrow">Investor desk</p>
+        <h1>Match your mandate to the book.</h1>
+        <p class="lede">Set hard investment criteria — ticket size, tenor, minimum yield. The deterministic screen runs free.
+        The AI underwriter's full credit report is a paid micro-service, settled per request on Hedera.</p>
+      </div>
+
+      <div class="invest-layout">
+        <div class="panel">
+          <div class="panel-head"><h3>Mandate</h3><span class="tag">Deterministic screen · free</span></div>
+          <form id="investForm">
+            <div class="grid-2">
+              <div class="field"><label for="invAmountMin">Ticket size from (USD)</label><input class="input" type="number" id="invAmountMin" placeholder="1000" min="1" step="any" required /></div>
+              <div class="field"><label for="invAmountMax">Ticket size to (USD)</label><input class="input" type="number" id="invAmountMax" placeholder="50000" min="1" step="any" required /></div>
+              <div class="field"><label for="invDurationMin">Tenor from (days)</label><input class="input" type="number" id="invDurationMin" placeholder="15" min="1" step="1" required /></div>
+              <div class="field"><label for="invDurationMax">Tenor to (days)</label><input class="input" type="number" id="invDurationMax" placeholder="120" min="1" step="1" required /></div>
+              <div class="field"><label for="invApyMin">Minimum APY (%)</label><input class="input" type="number" id="invApyMin" placeholder="12" min="0" step="any" required /></div>
+            </div>
+            <div class="field">
+              <label for="invNote">Allocation note <span class="label-hint">— guides the AI underwriter, not the screen</span></label>
+              <textarea class="input" id="invNote" rows="2" placeholder="e.g. Prefer consumer staples debtors; avoid single-invoice concentration above $20k."></textarea>
+            </div>
+            <button class="btn btn-gold btn-block" type="submit" id="investSearchBtn">Run screen</button>
+          </form>
+          <button class="btn btn-ghost btn-block hidden" id="smartReportBtn" style="margin-top:12px;">Generate AI credit report</button>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Screen results</h3>
+            <span class="tag hidden" id="resultsCount"></span>
+          </div>
+          <div id="investResults" class="results-col scrollable">
+            <div class="placeholder placeholder-quiet"><p>Set your mandate and run the screen. Matches appear here ranked by APY and fit.</p></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="smartReportSection" class="hidden">
+        <div class="report-banner">
+          <div class="report-banner-head">
+            <div>
+              <p class="eyebrow">AI underwriter · paid micro-service · x402</p>
+              <h2>AI Credit Report</h2>
+            </div>
+            <div class="report-banner-tools">
+              <span class="tag tag-paid" id="reportUsage"></span>
+              <button class="btn btn-ghost btn-sm" id="reportCopyBtn">Copy summary</button>
+              <button class="btn btn-ghost btn-sm" id="reportDownloadBtn">Export JSON</button>
+            </div>
+          </div>
+          <p class="meta-line hidden" id="reportMeta"></p>
+          <div id="smartReportContainer"></div>
+        </div>
+      </div>
+    </section>
+    <!-- ── RAISE ── -->
+    <section class="view" id="view-raise">
+      <div class="view-head">
+        <p class="eyebrow">Issuer desk</p>
+        <h1>Liquidity against your unpaid invoices.</h1>
+        <p class="lede">List a receivable at a discount. Publishing is a paid on-chain action — the x402 protocol
+        prices the listing and settles in HBAR before the desk reviews your document.</p>
+      </div>
+
+      <div class="raise-layout">
+        <div class="panel">
+          <div class="panel-head"><h3>New listing</h3><span class="tag tag-paid">Publish · x402 micro-payment</span></div>
+          <form id="raiseForm">
+            <div class="field">
+              <label for="raiseProposer">Issuer wallet (EVM)</label>
+              <div class="input-row">
+                <input class="input" type="text" id="raiseProposer" placeholder="0x71C8366420A8004b553A3Ed0B8679B7F13cDb82a" required />
+                <button type="button" class="btn btn-ghost btn-sm" id="raiseRandomAddrBtn">Generate</button>
+              </div>
+            </div>
+            <div class="grid-2">
+              <div class="field"><label for="raiseDebtType">Instrument</label>
+                <select class="input" id="raiseDebtType" required>
+                  <option value="INVOICE">Invoice</option>
+                  <option value="PURCHASE_ORDER">Purchase order</option>
+                  <option value="ACCOUNT_RECEIVABLE">Account receivable</option>
+                  <option value="CHECK">Check</option>
+                  <option value="OTHER">Other</option>
+                </select>
+              </div>
+              <div class="field"><label for="raiseIndustry">Industry</label><input class="input" type="text" id="raiseIndustry" placeholder="Food distribution" required /></div>
+              <div class="field"><label for="raiseDebtor">Debtor (obligor)</label><input class="input" type="text" id="raiseDebtor" placeholder="Northstar Foods Distribution Ltd." required /></div>
+              <div class="field"><label for="raiseInvoiceNo">Invoice number</label><input class="input" type="text" id="raiseInvoiceNo" placeholder="INV-2026-00421" required /></div>
+              <div class="field"><label for="raiseInvoiceDate">Invoice date</label><input class="input" type="date" id="raiseInvoiceDate" required /></div>
+              <div class="field"><label for="raiseDueDate">Maturity (due date)</label><input class="input" type="date" id="raiseDueDate" required /></div>
+              <div class="field"><label for="raiseFaceValue">Face value (USD)</label><input class="input" type="number" id="raiseFaceValue" placeholder="10000" min="1" step="any" required /></div>
+              <div class="field"><label for="raiseAdvance">Requested advance (USD)</label><input class="input" type="number" id="raiseAdvance" placeholder="9000" min="1" step="any" required /></div>
+            </div>
+            <details class="advanced">
+              <summary>Optional credit detail</summary>
+              <div class="grid-2">
+                <div class="field"><label for="raiseJurisdiction">Governing jurisdiction</label><input class="input" type="text" id="raiseJurisdiction" placeholder="Delaware, USA" /></div>
+                <div class="field"><label for="raiseCollateral">Collateral description</label><input class="input" type="text" id="raiseCollateral" placeholder="Pledged receivables + inventory lien" /></div>
+                <div class="field checkbox-field"><label><input type="checkbox" id="raiseRecourse" /> With recourse to issuer</label></div>
+              </div>
+            </details>
+
+            <div class="quotebox">
+              <div class="quotebox-main">
+                <span class="quotebox-label">Estimated annualized yield</span>
+                <span class="quotebox-value" id="raiseApyPreview">0.00%</span>
+              </div>
+              <span class="quotebox-sub" id="raiseApyDetails">Yield: $0 (0%) · Term: 0 days</span>
+            </div>
+
+            <div id="raiseMessages"></div>
+            <button class="btn btn-gold btn-block" type="submit" id="raiseSubmitBtn"><span id="raiseSubmitText">Publish listing</span><span class="spinner hidden" id="raiseSubmitSpinner"></span></button>
+            <p class="fineprint">The payment is authorized server-side by your agent wallet and co-settled by the Blocky402 facilitator. This browser never holds keys.</p>
+          </form>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h3>Your listings</h3></div>
+          <form class="keyrow" id="myListingsForm">
+            <input class="input" type="text" id="myListingsKey" placeholder="Issuer wallet — 0x…" />
+            <button class="btn btn-ghost btn-sm" type="submit">Load</button>
+          </form>
+          <p class="meta-line" id="myListingsMeta">Enter the wallet you publish from to track signatures and verification.</p>
+          <div id="myListings" class="results-col"></div>
+        </div>
+      </div>
+    </section>
+    <!-- ── SETTLEMENT (ATS) ── -->
+    <section class="view" id="view-settlement">
+      <div class="view-head">
+        <p class="eyebrow">ATS · factored-hedera</p>
+        <h1>Tokenized settlement on Hedera.</h1>
+        <p class="lede">A signed listing becomes a security. The receivable is tokenized, the investor funds it in USDC,
+        and redemption executes against a scheduled payout at maturity — a full ATS lifecycle on-chain.</p>
+      </div>
+
+      <div class="lifecycle-rail" id="lifecycleRail">
+        <div class="rail-step" data-step="2"><span class="rail-num">02</span><span class="rail-name">Register</span><span class="rail-sub">Receivable listed on ATS</span></div>
+        <div class="rail-step" data-step="3"><span class="rail-num">03</span><span class="rail-name">Authorize</span><span class="rail-sub">Operator approved</span></div>
+        <div class="rail-step" data-step="4"><span class="rail-num">04</span><span class="rail-name">Allowance</span><span class="rail-sub">USDC approved</span></div>
+        <div class="rail-step" data-step="5"><span class="rail-num">05</span><span class="rail-name">Execute</span><span class="rail-sub">Tokens · funds · schedule</span></div>
+        <div class="rail-step" data-step="6"><span class="rail-num">06</span><span class="rail-name">Redeem</span><span class="rail-sub">Maturity payout</span></div>
+      </div>
+
+      <div class="settle-layout">
+        <div class="panel">
+          <div class="panel-head"><h3>Issuer desk</h3><span class="tag">Steps 02–03</span></div>
+
+          <div class="step-block">
+            <p class="step-label">Step 02 · Register receivable</p>
+            <form id="atsRegisterForm">
+              <div class="field"><label for="atsRegProposal">Signed listing</label><select class="input" id="atsRegProposal" required></select></div>
+              <div class="field">
+                <label for="atsSupplierAccount">Issuer Hedera account</label>
+                <input class="input" type="text" id="atsSupplierAccount" placeholder="0.0.10446661" required />
+                <span class="field-hint">Testnet fixture: 0.0.10446661</span>
+              </div>
+              <label class="checkbox-field"><input type="checkbox" id="atsForce" /> Skip seller-verification requirement (test mode)</label>
+              <button class="btn btn-ghost btn-block" type="submit" id="atsRegisterBtn">Register on ATS</button>
+              <div id="atsRegisterResult" class="resultbox hidden"></div>
+            </form>
+          </div>
+
+          <div class="step-block">
+            <p class="step-label">Step 03 · Authorize operator <span class="label-hint">— optional for new issues; the pipeline self-authorizes</span></p>
+            <form id="atsAuthorizeForm">
+              <div class="field"><label for="atsAuthReg">Registered receivable</label><select class="input" id="atsAuthReg" required></select></div>
+              <div class="field"><label for="atsSecurityId">Security id (existing token)</label><input class="input" type="text" id="atsSecurityId" placeholder="0.0.10446844" /></div>
+              <button class="btn btn-ghost btn-block" type="submit" id="atsAuthorizeBtn">Authorize FACTORED operator</button>
+              <div id="atsAuthorizeResult" class="resultbox hidden"></div>
+            </form>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h3>Investor desk</h3><span class="tag">Steps 04–06</span></div>
+
+          <div class="step-block">
+            <p class="step-label">Step 04 · Approve USDC allowance</p>
+            <form id="atsAllowanceForm">
+              <div class="grid-2">
+                <div class="field"><label for="atsInvestorAccount">Investor Hedera account</label><input class="input" type="text" id="atsInvestorAccount" placeholder="0.0.10476670" required /><span class="field-hint">Testnet fixture: 0.0.10476670</span></div>
+                <div class="field"><label for="atsAllowanceAmount">Amount (USD)</label><input class="input" type="number" id="atsAllowanceAmount" min="1" step="0.01" placeholder="Auto — purchase price" /></div>
+              </div>
+              <button class="btn btn-ghost btn-block" type="submit" id="atsAllowanceBtn">Approve allowance</button>
+              <div id="atsAllowanceResult" class="resultbox hidden"></div>
+            </form>
+          </div>
+
+          <div class="step-block">
+            <p class="step-label">Step 05 · Execute trade <span class="label-hint">— tokenize → settle → schedule · may take minutes on-chain</span></p>
+            <form id="atsExecuteForm">
+              <div class="field"><label for="atsExecReg">Registered receivable</label><select class="input" id="atsExecReg" required></select></div>
+              <div class="field"><label for="atsExecPrice">Purchase price (USD)</label><input class="input" type="number" id="atsExecPrice" min="1" step="0.01" placeholder="Auto — minimum proceeds" /></div>
+              <button class="btn btn-gold btn-block" type="submit" id="atsExecuteBtn">Execute trade</button>
+              <div id="atsExecuteResult" class="resultbox hidden"></div>
+            </form>
+          </div>
+
+          <div class="step-block">
+            <p class="step-label">Step 06 · Maturity &amp; redemption</p>
+            <form id="atsMaturityForm" onsubmit="return false;">
+              <div class="field"><label for="atsMatReg">Funded receivable</label><select class="input" id="atsMatReg" required></select></div>
+              <div class="grid-2">
+                <div class="field"><label for="atsDebtorTx">Debtor payment reference</label><input class="input" type="text" id="atsDebtorTx" placeholder="Bank reference / tx id" /></div>
+                <div class="field"><label for="atsDebtorAmount">Amount received (USD)</label><input class="input" type="number" id="atsDebtorAmount" min="1" step="0.01" placeholder="Auto — face value" /></div>
+              </div>
+              <div class="btn-row">
+                <button class="btn btn-ghost" type="button" id="atsCheckBtn">Check maturity</button>
+                <button class="btn btn-ghost" type="button" id="atsConfirmBtn">Confirm debtor payment</button>
+                <button class="btn btn-gold" type="button" id="atsRedeemBtn">Redeem</button>
+              </div>
+              <div id="atsMaturityResult" class="resultbox hidden"></div>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-head">
+        <div><p class="eyebrow">Register</p><h2>Settlement ledger</h2></div>
+        <button class="btn btn-ghost btn-sm" id="atsLedgerRefresh">Refresh</button>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="atsLedger">
+          <thead><tr><th>Listing</th><th>Receivable</th><th>Face</th><th>Min. proceeds</th><th>Maturity</th><th>Security</th><th>ISIN</th><th>Allowance</th><th>Status</th></tr></thead>
+          <tbody><tr><td colspan="9" class="table-empty">No registrations yet.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+    <!-- ── INTELLIGENCE ── -->
+    <section class="view" id="view-intelligence">
+      <div class="view-head">
+        <p class="eyebrow">Market intelligence desk</p>
+        <h1>The hurdle rate, before you allocate.</h1>
+        <p class="lede">Live lending-market benchmarks across protocols and chains, aggregated by The Graph,
+        distilled into an AI market review — the alternative cost of every basis point on this platform.</p>
+      </div>
+
+      <div class="panel panel-wide">
+        <div class="panel-head">
+          <h3>DeFi yield benchmarks</h3>
+          <span class="tag tag-paid">Paid · x402 · per request</span>
+        </div>
+        <div class="intel-controls">
+          <button class="btn btn-gold" id="intelRunBtn"><span id="intelRunText">Buy &amp; run market analysis</span><span class="spinner hidden" id="intelRunSpinner"></span></button>
+          <p class="meta-line hidden" id="intelStatus"></p>
+        </div>
+        <div id="intelPayment"></div>
+        <div id="intelOutput">
+          <div class="placeholder placeholder-quiet"><p>Run the analysis to pull live supply-APY benchmarks, TVL data and the AI market review.</p></div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ══ Footer ══ -->
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#0B0F1A"/><path d="M10 24V8h13v4h-8.4v3.2H22v4h-7.4V24z" fill="currentColor"/></svg>
+        <span>FACTORA</span>
+      </div>
+      <p class="footer-legal">Factora is a demonstration marketplace for AI-underwritten receivables financing, settled on Hedera testnet via the x402 protocol and the Blocky402 facilitator. Nothing on this site is investment advice. Digital assets involve risk, including loss of principal.</p>
+      <p class="footer-meta">Payments: x402 / HBAR · Identity: World ID Selfie Check · Settlement: factored-hedera ATS · Market data: The Graph</p>
+    </div>
+  </footer>
+  <!-- ══ Selfie Check modal ══ -->
+  <div class="modal-overlay hidden" id="selfieModal">
+    <div class="modal">
+      <div class="modal-head">
+        <div><p class="eyebrow" id="selfieModeLabel">Verification</p><h3 id="selfieTitle">World ID Selfie Check</h3></div>
+        <button class="modal-close" id="selfieCloseBtn" aria-label="Close" onclick="closeSelfie()">✕</button>
+      </div>
+      <p class="modal-desc" id="selfieDesc"></p>
+      <div class="field"><label for="selfieAppId">World App ID (pk)</label><input class="input" type="text" id="selfieAppId" placeholder="app_…" autocomplete="off" /></div>
+      <div class="field"><label for="selfieKey">RP signing key <span class="label-hint">— optional, falls back to server key</span></label><input class="input" type="password" id="selfieKey" placeholder="0x…" autocomplete="off" /></div>
+      <div class="selfie-connector hidden" id="selfieConnector">
+        <p class="selfie-connector-label">Open this link on your phone (World App or simulator):</p>
+        <div class="code-block" id="selfieConnectorUri"></div>
+        <div class="btn-row">
+          <button class="btn btn-ghost btn-sm" id="selfieCopyBtn">Copy link</button>
+          <a class="btn btn-ghost btn-sm" href="https://simulator.worldcoin.org" target="_blank" rel="noopener">Open simulator ↗</a>
+        </div>
+      </div>
+      <p class="selfie-status" id="selfieStatus">Enter the World App ID and start the flow.</p>
+      <div class="resultbox hidden" id="selfieResult"></div>
+      <div class="modal-actions">
+        <button class="btn btn-gold" id="selfieStartBtn">Start verification</button>
+        <button class="btn btn-ghost" id="selfieCancelBtn" onclick="closeSelfie()">Cancel</button>
+        <span class="spinner hidden" id="selfieSpinner"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ Developer console (corner) ══ -->
+  <button class="dev-fab" id="devFab" title="Developer diagnostics" aria-label="Developer diagnostics">
+    <span class="dev-fab-dot" id="devFabDot"></span>
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 9l-4 3 4 3"/><path d="M16 9l4 3-4 3"/><path d="M13 5l-2 14"/></svg>
+  </button>
+
+  <aside class="dev-drawer" id="devDrawer" aria-hidden="true">
+    <div class="dev-head">
+      <div><p class="eyebrow">Developer</p><h3>System diagnostics</h3></div>
+      <button class="modal-close" id="devCloseBtn" aria-label="Close">✕</button>
+    </div>
+
+    <div class="dev-grid" id="devChecks">
+      <div class="dev-check" data-check="server"><div class="dev-check-head"><span class="dev-dot"></span><strong>Application server</strong><span class="dev-check-status" id="devServerStatus">…</span></div><p class="dev-check-sub" id="devServerSub">GET /health</p></div>
+      <div class="dev-check" data-check="agent"><div class="dev-check-head"><span class="dev-dot"></span><strong>Agent wallet (x402 payer)</strong><span class="dev-check-status" id="devAgentStatus">…</span></div><p class="dev-check-sub" id="devAgentSub">GET /api/agent/status</p></div>
+      <div class="dev-check" data-check="ats"><div class="dev-check-head"><span class="dev-dot"></span><strong>ATS sidecar (Hedera)</strong><span class="dev-check-status" id="devAtsStatus">…</span></div><p class="dev-check-sub" id="devAtsSub">GET /api/ats/health · identity-verified</p></div>
+      <div class="dev-check" data-check="world"><div class="dev-check-head"><span class="dev-dot"></span><strong>World ID Selfie Check</strong><span class="dev-check-status" id="devWorldStatus">…</span></div><p class="dev-check-sub" id="devWorldSub">GET /api/world/config</p></div>
+      <div class="dev-check" data-check="x402"><div class="dev-check-head"><span class="dev-dot"></span><strong>x402 payment gate</strong><span class="dev-check-status" id="devX402Status">…</span></div><p class="dev-check-sub" id="devX402Sub">unpaid POST /api/proposals → expect 402</p></div>
+      <div class="dev-check" data-check="llm"><div class="dev-check-head"><span class="dev-dot"></span><strong>LLM underwriter pricing</strong><span class="dev-check-status" id="devLlmStatus">…</span></div><p class="dev-check-sub" id="devLlmSub">unpaid POST /api/buyer/smart-report → expect 402</p></div>
+      <div class="dev-check" data-check="graph"><div class="dev-check-head"><span class="dev-dot"></span><strong>Graph intelligence gate</strong><span class="dev-check-status" id="devGraphStatus">…</span></div><p class="dev-check-sub" id="devGraphSub">unpaid POST /api/graph/insights → expect 402</p></div>
+      <button class="btn btn-ghost btn-sm" id="devRunAll">Run all diagnostics</button>
+    </div>
+
+    <div class="dev-section">
+      <div class="dev-section-head"><h4>x402 protocol inspector</h4>
+        <button class="btn btn-ghost btn-sm" id="devInspectBtn">Send unpaid request</button>
+      </div>
+      <pre class="code-block" id="devInspectorOutput">// POST /api/proposals without payment — the raw 402 challenge appears here.</pre>
+      <button class="btn btn-gold btn-sm hidden" id="devInspectorPay">Pay invoice with agent wallet</button>
+    </div>
+  </aside>
+
+  <div class="toast-stack" id="toastStack"></div>
+
+  <script src="app.js?v=5"></script>
+</body>
+</html>
