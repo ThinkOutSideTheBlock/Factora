@@ -1,27 +1,3 @@
-export interface ApprovedTrade {
-  receivableId: string;
-  supplierAccountId: string;
-  investorAccountId: string;
-  faceValueUsd: number;
-  purchasePriceUsd: number;
-  maturityTimestamp: number;
-  riskGrade: string;
-  debtorName: string;
-}
-
-export interface SettlementResult {
-  receivableId: string;
-  securityId: string;
-  purchasePriceUsd: number;
-  tokenizationTxId?: string;
-  issuanceTxId?: string;
-  clearingTransferTxId?: string;
-  clearingApprovalTxId?: string;
-  cashTransferTxId?: string;
-  auditTxIds: string[];
-  status: "EXECUTED" | "FAILED";
-  scheduleId?: string;
-}
 export interface PartyConfirmation {
   /** Offer id this party is confirming — ties it to specific negotiated terms. */
   offerId: string;
@@ -58,4 +34,6 @@ export interface SettlementResult {
   cashTransferTxId?: string;
   auditTxIds: string[];
   status: "EXECUTED" | "FAILED";
+  /** Present when the maturity payout schedule was created (step 8). */
+  scheduleId?: string;
 }

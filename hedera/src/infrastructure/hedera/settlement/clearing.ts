@@ -48,6 +48,63 @@ function extractClearingId(result: any): number | undefined {
   return undefined;
 }
 
+/**
+ * Cleared-transfer events emitted by the ClearingByPartition facet. All
+ * three variants share the same shape; each has its own topic0 by name.
+ */
+const CLEARED_TRANSFER_EVENTS = new Interface([
+  "event ClearedTransferByPartition(address indexed operator, address indexed tokenHolder, address indexed to, bytes32 partition, uint256 clearingId, uint256 amount, uint256 expirationDate, bytes data, bytes operatorData)",
+  "event ClearedTransferFromByPartition(address indexed operator, address indexed tokenHolder, address indexed to, bytes32 partition, uint256 clearingId, uint256 amount, uint256 expirationDate, bytes data, bytes operatorData)",
+  "event ClearedOperatorTransferByPartition(address indexed operator, address indexed tokenHolder, address indexed to, bytes32 partition, uint256 clearingId, uint256 amount, uint256 expirationDate, bytes data, bytes operatorData)",
+]);
+
+function extractClearingIdFromReceipt(receipt: any): number | undefined {
+  for (const log of receipt?.logs ?? []) {
+    try {
+      const parsed = CLEARED_TRANSFER_EVENTS.parseLog({
+        topics: log.topics,
+        data: log.data,
+      });
+      if (parsed?.name?.startsWith("Cleared")) {
+        return Number(parsed.args.clearingId);
+      }
+    } catch {
+      // log is not a cleared-transfer event — try the next one
+    }
+  }
+  return undefined;
+}
+
+async function fetchReceipt(transactionHash: string): Promise<any | undefined> {
+  const { data: body } = await rpc.post("", {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "eth_getTransactionReceipt",
+    params: [transactionHash],
+  });
+  return body?.result;
+}
+
+/**
+ * The SDK's RPCTransactionResponseAdapter only reports the boolean success
+ * (`response: 1`) for RPC-mode transactions — the clearingId is NOT in the
+ * response payload. Recover it from the ClearedTransfer*ByPartition event
+ * in the transaction receipt (small retry loop for relay indexing lag).
+ */
+export async function resolveClearingIdFromReceipt(
+  transactionHash: string | undefined,
+): Promise<number | undefined> {
+  if (!transactionHash || !transactionHash.startsWith("0x")) return undefined;
+  const attempts = 10;
+  for (let i = 0; i < attempts; i++) {
+    const receipt = await fetchReceipt(transactionHash);
+    const id = extractClearingIdFromReceipt(receipt);
+    if (id != null) return id;
+    await new Promise((r) => setTimeout(r, 2_000));
+  }
+  return undefined;
+}
+
 export const DEFAULT_PARTITION =
   "0x0000000000000000000000000000000000000000000000000000000000000001";
 
@@ -112,8 +169,10 @@ export async function isOperatorForHolder(
 
 /**
  * Whether `operatorEvm` is authorized to act for `holderEvm` in `partitionId`
- * (IOperatorByPartition). The ClearingByPartitionFacet enforces this for
- * operator-from clearing transfers, so it must be true before settlement.
+ * (IOperatorByPartition). NOTE: operator authorization alone is not enough —
+ * the ClearingByPartitionFacet ALSO consumes the holder → operator ERC-20
+ * allowance on the security token for operator-from clearing (see
+ * `getSecurityTokenAllowance`).
  */
 export async function isOperatorForPartition(
   securityEvm: string,
@@ -140,6 +199,36 @@ export async function isOperatorForPartition(
   return Boolean(
     iface.decodeFunctionResult("isOperatorForPartition", result)[0],
   );
+}
+
+/**
+ * Plain ERC-20 allowance `owner → spender` on the security token. The ATS
+ * ClearingByPartitionFacet consumes this allowance for operator-from
+ * clearing (`decreaseAllowedBalanceForClearing` → `InsufficientAllowance`
+ * revert when it is below the clearing amount), so it must be ≥ the amount
+ * before `initiateClearingTransfer` runs in operator-from mode.
+ */
+export async function getSecurityTokenAllowance(
+  securityEvm: string,
+  ownerEvm: string,
+  spenderEvm: string,
+): Promise<bigint> {
+  const iface = new Interface([
+    "function allowance(address owner, address spender) view returns (uint256)",
+  ]);
+  const data = iface.encodeFunctionData("allowance", [
+    ownerEvm,
+    spenderEvm,
+  ]);
+  const { data: body } = await rpc.post("", {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "eth_call",
+    params: [{ to: securityEvm, data }, "latest"],
+  });
+  const result = body?.result as string | undefined;
+  if (!result || result === "0x") return 0n;
+  return BigInt(iface.decodeFunctionResult("allowance", result)[0]);
 }
 
 export interface SecurityClearingInput {
@@ -232,10 +321,26 @@ export async function initiateClearingTransfer(
       operatorEvm,
       sourceEvm,
     );
+    const requiredAllowance = BigInt(String(input.amount ?? "1"));
+    const securityAllowance = await getSecurityTokenAllowance(
+      securityEvm,
+      sourceEvm,
+      operatorEvm,
+    );
     if (!authorizedGlobal && !authorizedForPartition) {
       throw new Error(
         `isOperator(${operatorEvm}, ${sourceEvm}) and isOperatorForPartition(${partitionId}, ${operatorEvm}, ${sourceEvm}) are both false. ` +
         `Authorize the operator (global and per-partition) with the supplier signer first.`,
+      );
+    }
+    if (securityAllowance < requiredAllowance) {
+      throw new Error(
+        `ERC-20 allowance on the security token is insufficient: ` +
+        `allowance(${sourceEvm} → ${operatorEvm}) = ${securityAllowance} but clearing needs ${requiredAllowance}. ` +
+        `The ClearingByPartitionFacet consumes the supplier → operator ERC-20 allowance ` +
+        `on the security token for operator-from clearing (clearingTransferFromByPartition → ` +
+        `decreaseAllowedBalanceForClearing → InsufficientAllowance). Approve it with the ` +
+        `supplier signer first (approveSecurityAllowanceFromEnv).`,
       );
     }
 
@@ -269,8 +374,19 @@ export async function initiateClearingTransfer(
     transactionId: result?.id ?? result?.transactionId,
   });
 
+  const resolvedClearingId =
+    clearingId ??
+    (await resolveClearingIdFromReceipt(
+      result?.id ?? result?.transactionId,
+    ));
+  if (clearingId == null && resolvedClearingId != null) {
+    console.log("[clearing] clearingId recovered from receipt", {
+      clearingId: resolvedClearingId,
+    });
+  }
+
   return {
-    clearingId,
+    clearingId: resolvedClearingId,
     transactionId: result?.id ?? result?.transactionId,
     raw: result,
   };

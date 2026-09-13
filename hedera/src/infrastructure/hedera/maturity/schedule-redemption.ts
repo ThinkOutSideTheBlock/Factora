@@ -20,6 +20,21 @@ export async function scheduleInvestorPayout(client: Client, input: ScheduleRede
     const redemptionAccount = AccountId.fromString(env.FACTORED_REDEMPTION_ACCOUNT_ID);
     const investorAccount = AccountId.fromString(input.investorAccountId);
 
+    // The payout schedule uses the maturity as its expirationTime
+    // (waitForExpiry → the schedule fires AT maturity). Hedera requires
+    // expirationTime > consensus time at schedule creation, so a maturity
+    // that has already passed (or lands within the pipeline slack) cannot
+    // be scheduled — fail with an actionable message instead of the raw
+    // SCHEDULE_EXPIRATION_TIME_MUST_BE_HIGHER_THAN_CONSENSUS_TIME error.
+    const minExpirationSeconds = Math.floor(Date.now() / 1000) + 60;
+    if (input.maturityTimestamp <= minExpirationSeconds) {
+        throw new Error(
+            `maturityTimestamp ${input.maturityTimestamp} (${new Date(input.maturityTimestamp * 1000).toISOString()}) is not in the future — ` +
+            `the payout schedule must expire AFTER consensus time. Increase the maturity offset ` +
+            `(e.g. TEST_E2E_MATURITY_OFFSET_SECONDS) so the pipeline can still create the schedule before maturity.`,
+        );
+    }
+
     const payout = new TransferTransaction()
         .addTokenTransfer(tokenId, redemptionAccount, -amountSmallestUnit)
         .addTokenTransfer(tokenId, investorAccount, amountSmallestUnit);

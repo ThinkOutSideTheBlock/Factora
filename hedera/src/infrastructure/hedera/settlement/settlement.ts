@@ -5,6 +5,7 @@ import { ATSKycAdapter, KYC_STATUS_GRANTED } from "../ats/kyc.js";
 import {
   ClearingAdapter,
   DEFAULT_PARTITION,
+  getSecurityTokenAllowance,
   isOperatorForHolder,
   isOperatorForPartition,
 } from "./clearing.js";
@@ -16,7 +17,11 @@ import {
   resolveAccountEvmAddress,
   resolveContractEvmAddress,
 } from "../ats/kycCredential.js";
-import { authorizeOperatorFromEnv, authorizeOperatorForPartitionFromEnv } from "../ats/authorize-operator.js";
+import {
+  approveSecurityAllowanceFromEnv,
+  authorizeOperatorFromEnv,
+  authorizeOperatorForPartitionFromEnv,
+} from "../ats/authorize-operator.js";
 import { settleUsdcFromAllowance } from "../hts/usdc.js";
 import { writeAuditEvent } from "../hcs/audit.js";
 import { scheduleInvestorPayout } from "../maturity/schedule-redemption.js";
@@ -156,9 +161,9 @@ export async function executeApprovedTrade(
 
   // 3b. Supplier authorizes the operator for this security — both GLOBAL
   //     (IOperator.isOperator) and PER-PARTITION (IOperatorByPartition
-  //     isOperatorForPartition). The partition-scoped authorization is what
-  //     ClearingByPartitionFacet.clearedTransferFromByPartition enforces, so
-  //     both are needed for the operator-from clearing during settlement.
+  //     isOperatorForPartition). Operator authorization passes the facet's
+  //     permission gate, but the operator-from clearing ALSO consumes the
+  //     supplier → operator ERC-20 allowance on the security token (step 3c).
   //     Custodial mode A; each step is idempotent and one-time per security.
   const supplierEvm = await resolveAccountEvmAddress(trade.supplierAccountId);
   const authorizedGlobal = await isOperatorForHolder(
@@ -190,6 +195,33 @@ export async function executeApprovedTrade(
       operatorEvm,
       partitionId: DEFAULT_PARTITION,
       supplierAccountId: trade.supplierAccountId,
+    });
+  }
+
+  // 3c. Security-token ERC-20 allowance — clearedTransferFromByPartition
+  //     consumes the supplier → operator allowance on the security diamond
+  //     (ClearingOps.decreaseAllowedBalanceForClearing reverts with
+  //     InsufficientAllowance when it is below the clearing amount). It is
+  //     decremented by each clearing, so top it up whenever it falls short.
+  const CLEARING_AMOUNT = 1n;
+  const securityAllowance = await getSecurityTokenAllowance(
+    securityEvm,
+    supplierEvm,
+    operatorEvm,
+  );
+  if (securityAllowance < CLEARING_AMOUNT) {
+    console.log("[settlement] supplier security-token approve (clearing allowance) required", {
+      currentAllowance: securityAllowance.toString(),
+      required: CLEARING_AMOUNT.toString(),
+    });
+    const approvedAllowance = await approveSecurityAllowanceFromEnv({
+      securityEvm,
+      operatorEvm,
+      amount: CLEARING_AMOUNT,
+      supplierAccountId: trade.supplierAccountId,
+    });
+    console.log("[settlement] security-token approve done", {
+      transactionId: approvedAllowance.transactionId,
     });
   }
 

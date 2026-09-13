@@ -39,6 +39,7 @@ const executeBodySchema = z.object({
     isin: z.string().min(1),
     supplierConfirmation: confirmSchema,
     investorConfirmation: confirmSchema,
+    throughClearingOnly: z.boolean().optional(),
 });
 
 function assertDealConfirmed(
@@ -85,6 +86,24 @@ export async function registerAgentHederaRoutes(
                 body,
             );
 
+            // The payout schedule (settlement step 8) uses the maturity as its
+            // schedule expirationTime, which Hedera requires to still be in the
+            // future when the pipeline reaches it. The pipeline takes ~6-7
+            // minutes end-to-end, so a short-dated maturity would burn the
+            // whole on-chain flow before failing at the last step — reject it
+            // up front.
+            const minMaturitySeconds = Math.floor(Date.now() / 1000) + 600;
+            if (body.maturityTimestamp <= minMaturitySeconds) {
+                return reply.code(422).send({
+                    error: "MATURITY_TOO_SOON",
+                    message:
+                        "maturityTimestamp must be at least 600s in the future — the payout " +
+                        "schedule created during settlement expires AT maturity (Hedera requires " +
+                        "expirationTime > consensus time at creation), and the pipeline takes " +
+                        "several minutes before it gets there.",
+                });
+            }
+
             const trade: ApprovedTrade = {
                 receivableId: body.receivableId,
                 supplierAccountId: body.supplierAccountId,
@@ -108,7 +127,9 @@ export async function registerAgentHederaRoutes(
                 },
             };
 
-            const result = await executeApprovedTrade(trade, body.isin);
+            const result = await executeApprovedTrade(trade, body.isin, {
+                throughClearingOnly: body.throughClearingOnly ?? false,
+            });
 
             // Persist the execution outcome so the maturity API (and other
             // consumers) can drive the lifecycle without re-deriving state.
@@ -142,9 +163,13 @@ export async function registerAgentHederaRoutes(
             }
             if (
                 err instanceof HederaExecutionNotReadyError ||
-                /isOperator/i.test(String(err?.message ?? err))
+                /isOperator|allowance on the security token/i.test(
+                    String(err?.message ?? err),
+                )
             ) {
-                const isAuth = /isOperator/i.test(String(err?.message ?? err));
+                const isAuth = /isOperator|allowance on the security token/i.test(
+                    String(err?.message ?? err),
+                );
                 return reply.code(isAuth ? 424 : 503).send({
                     error: isAuth
                         ? "SupplierNotAuthorizedError"

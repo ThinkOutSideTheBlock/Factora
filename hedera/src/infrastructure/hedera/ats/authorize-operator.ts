@@ -14,6 +14,18 @@ const { RPCTransactionAdapter } = require(
     join(sdkRoot, "port/out/rpc/RPCTransactionAdapter.js"),
 );
 
+/**
+ * IAsset__factory from the contracts package the SDK itself uses for its
+ * low-level writes (executeTransaction expects a factory/contract object
+ * exposing the method to call).
+ */
+const { IAsset__factory } = require(
+    require.resolve("@hashgraph/asset-tokenization-contracts"),
+) as { IAsset__factory: any };
+
+/** Gas limit for the ERC-20 approve write on the security diamond. */
+const APPROVE_SECURITY_ALLOWANCE_GAS = 1_000_000;
+
 /** Low-level: ATS signer must already be the supplier. */
 export async function authorizeOperatorAsSupplier(
     securityEvm: string,
@@ -98,7 +110,10 @@ export async function authorizeOperatorFromEnv(input: {
 
 /**
  * Partition-scoped variant: the supplier authorizes the operator to act for
- * them within `partitionId` (needed by operator-from clearing).
+ * them within `partitionId`. NOTE: for operator-from clearing the ATS
+ * ClearingByPartitionFacet additionally consumes the supplier → operator
+ * ERC-20 allowance on the security token (see
+ * `approveSecurityAllowanceAsSupplier`), so this alone is NOT sufficient.
  */
 export async function authorizeOperatorForPartition(input: {
     securityEvm: string;
@@ -148,4 +163,63 @@ export async function authorizeOperatorForPartitionFromEnv(input: {
         ...input,
         supplierPrivateKey: key,
     });
+}
+
+/**
+ * Low-level: the SUPPLIER grants the OPERATOR an ERC-20 allowance on the
+ * security token (`approve(spender, value)` on the security diamond). The
+ * ClearingByPartitionFacet consumes this allowance for operator-from
+ * clearing (`clearingTransferFromByPartition` →
+ * `decreaseAllowedBalanceForClearing` → `InsufficientAllowance` revert when
+ * it is below the clearing amount). ATS signer must already be the supplier.
+ */
+export async function approveSecurityAllowanceAsSupplier(
+    securityEvm: string,
+    operatorEvm: string,
+    amount: bigint,
+): Promise<{ transactionId?: string; raw: unknown }> {
+    assertATSInitialized();
+    const adapter = Injectable.resolve(RPCTransactionAdapter);
+    const security = IAsset__factory.connect(
+        securityEvm,
+        adapter.getSignerOrProvider(),
+    );
+    const raw = await adapter.executeTransaction(
+        security,
+        "approve",
+        [operatorEvm, amount],
+        APPROVE_SECURITY_ALLOWANCE_GAS,
+    );
+    const transactionId =
+        (raw as any)?.id ?? (raw as any)?.transactionId;
+    return { transactionId, raw };
+}
+
+/** Custodial (A): supplier key in env/agent — top-up per trade as needed. */
+export async function approveSecurityAllowanceFromEnv(input: {
+    securityEvm: string;
+    operatorEvm: string;
+    amount: bigint;
+    supplierAccountId: string;
+}) {
+    const key =
+        process.env.TEST_SUPPLIER_PRIVATE_KEY ||
+        process.env.SUPPLIER_PRIVATE_KEY ||
+        "";
+    if (!key) {
+        throw new SupplierNotAuthorizedError(
+            "Set TEST_SUPPLIER_PRIVATE_KEY for the custodial security-token approve",
+        );
+    }
+
+    await registerAtsSigner(input.supplierAccountId, key);
+    try {
+        return await approveSecurityAllowanceAsSupplier(
+            input.securityEvm,
+            input.operatorEvm,
+            input.amount,
+        );
+    } finally {
+        await registerOperatorSigner();
+    }
 }
