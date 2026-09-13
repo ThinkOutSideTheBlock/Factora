@@ -6,7 +6,7 @@
     "requiredAmount": 9456,
     "returnDateInDays": 120,
     "apy": 17.5,
-    "status": "PENDING",
+    "status": "ACCEPTED",
     "createdAt": "2026-08-28T17:19:03.973Z",
     "debtDocument": {
       "debtType": "INVOICE",
@@ -37,6 +37,18 @@
       ],
       "reviewedAt": "2026-09-01T00:00:00.000Z",
       "model": "sample-seed-underwriter-v1"
+    },
+    "buyerSignature": {
+      "nullifier": "0x1d248b515338317e2e7c36a4a59354cf4bb424661b16d5ce10b382a2d7cafbbd",
+      "signedAt": "2026-09-13T04:41:51.063Z"
+    },
+    "selfieCheck": {
+      "status": "VERIFIED",
+      "nullifier": "0x1d248b515338317e2e7c36a4a59354cf4bb424661b16d5ce10b382a2d7cafbbd",
+      "action": "mandatory-selfie-check",
+      "rpId": "rp_edad427a804bd55a",
+      "authorizationId": "WORLD-0x1d248b515338317e2e7c36a4a59354cf4bb424661b16d5ce10b382a2d7cafbbd",
+      "verifiedAt": "2026-09-13T04:42:50.213Z"
     }
   },
   {
@@ -408,7 +420,7 @@
     "requiredAmount": 190464,
     "returnDateInDays": 180,
     "apy": 10.15,
-    "status": "PENDING",
+    "status": "ACCEPTED",
     "createdAt": "2026-08-07T12:54:31.821Z",
     "debtDocument": {
       "debtType": "INVOICE",
@@ -440,6 +452,18 @@
       ],
       "reviewedAt": "2026-09-01T00:00:00.000Z",
       "model": "sample-seed-underwriter-v1"
+    },
+    "buyerSignature": {
+      "nullifier": "0x1d248b515338317e2e7c36a4a59354cf4bb424661b16d5ce10b382a2d7cafbbd",
+      "signedAt": "2026-09-13T04:06:15.185Z"
+    },
+    "selfieCheck": {
+      "status": "VERIFIED",
+      "nullifier": "0x1d248b515338317e2e7c36a4a59354cf4bb424661b16d5ce10b382a2d7cafbbd",
+      "action": "mandatory-selfie-check",
+      "rpId": "rp_edad427a804bd55a",
+      "authorizationId": "WORLD-0x1d248b515338317e2e7c36a4a59354cf4bb424661b16d5ce10b382a2d7cafbbd",
+      "verifiedAt": "2026-09-13T04:07:45.269Z"
     }
   },
   {
@@ -3727,7 +3751,7 @@
     "requiredAmount": 104000,
     "returnDateInDays": 60,
     "apy": 5.85,
-    "status": "PENDING",
+    "status": "ACCEPTED",
     "createdAt": "2026-08-27T00:00:00.000Z",
     "debtDocument": {
       "debtType": "PURCHASE_ORDER",
@@ -3758,6 +3782,18 @@
       ],
       "reviewedAt": "2026-09-01T00:00:00.000Z",
       "model": "sample-seed-underwriter-v1"
+    },
+    "buyerSignature": {
+      "nullifier": "0x1d248b515338317e2e7c36a4a59354cf4bb424661b16d5ce10b382a2d7cafbbd",
+      "signedAt": "2026-09-13T06:22:16.442Z"
+    },
+    "selfieCheck": {
+      "status": "VERIFIED",
+      "nullifier": "0x1d248b515338317e2e7c36a4a59354cf4bb424661b16d5ce10b382a2d7cafbbd",
+      "action": "mandatory-selfie-check",
+      "rpId": "rp_edad427a804bd55a",
+      "authorizationId": "WORLD-0x1d248b515338317e2e7c36a4a59354cf4bb424661b16d5ce10b382a2d7cafbbd",
+      "verifiedAt": "2026-09-13T06:34:31.133Z"
     }
   },
   {
@@ -4174,5 +4210,84 @@
     "apy": 4.67,
     "status": "PENDING",
     "createdAt": "2026-09-12T04:16:01.577Z"
+  },
+  {
+    "id": "feee08d7-859d-46a4-b74f-209b8e120614",
+    "proposerAddress": "0x1111111111111111111111111111111111111111",
+    "amount": 5000,
+    "requiredAmount": 4500,
+    "returnDateInDays": 30,
+    "debtDocument": {
+      "debtType": "INVOICE",
+      "industry": "Food distribution",
+      "debtorCompany": "Northstar Foods Distribution Ltd.",
+      "invoiceNumber": "INV-2026-00421",
+      "invoiceDate": "2026-09-01",
+      "dueDate": "2026-10-01",
+      "faceValue": 5000,
+      "currency": "USD",
+      "disputeStatus": "UNKNOWN",
+      "paymentTermsDays": 30
+    },
+    "underwritingReview": {
+      "collectionConfidenceScore": 45,
+      "riskLevel": "HIGH",
+      "debtQuality": "C",
+      "underwriterComment": "Sample reference data indicates high risk with limited verification.",
+      "keyRisks": [
+        "Sample reference data, not verified",
+        "Industry default rate higher than benchmark",
+        "Debtor's payment score below industry average"
+      ],
+      "missingEvidence": [
+        "Verified financial statements",
+        "Payment history",
+        "Legal status",
+        "Collateral"
+      ],
+      "status": "COMPLETED",
+      "reviewedAt": "2026-09-13T05:36:22.570Z",
+      "model": "qwen2.5-coder:7b"
+    },
+    "apy": 135.19,
+    "status": "PENDING",
+    "createdAt": "2026-09-13T05:36:11.740Z"
+  },
+  {
+    "id": "6c21c0cd-4041-4368-b303-bec1267ea15e",
+    "proposerAddress": "0x69dcbc4993e95396caa6120bb37f07d61f92b0fd",
+    "amount": 5000,
+    "requiredAmount": 4567,
+    "returnDateInDays": 31,
+    "debtDocument": {
+      "debtType": "INVOICE",
+      "industry": "Food",
+      "debtorCompany": "mcelvis co",
+      "invoiceNumber": "inx-122",
+      "invoiceDate": "2026-08-12",
+      "dueDate": "2026-09-12",
+      "faceValue": 5000,
+      "currency": "USD",
+      "disputeStatus": "UNKNOWN",
+      "paymentTermsDays": 31
+    },
+    "underwritingReview": {
+      "collectionConfidenceScore": 40,
+      "riskLevel": "HIGH",
+      "debtQuality": "C",
+      "underwriterComment": "Sample reference data indicates high risk for this debtor.",
+      "keyRisks": [
+        "Sample reference data, not verified"
+      ],
+      "missingEvidence": [
+        "Verified debtor credit score, payment history, financial statements, or legal status"
+      ],
+      "status": "COMPLETED",
+      "reviewedAt": "2026-09-13T06:09:16.140Z",
+      "model": "qwen2.5-coder:7b"
+    },
+    "apy": 111.63,
+    "status": "PENDING",
+    "createdAt": "2026-09-13T06:09:13.665Z"
   }
 ]

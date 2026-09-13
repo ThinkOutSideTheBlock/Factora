@@ -44,6 +44,9 @@
       <button class="tab-btn" id="tabBtnGraph" onclick="switchTab('graph')">
         <span class="tab-icon">📊</span> Graph Market Insights
       </button>
+      <button class="tab-btn" id="tabBtnAts" onclick="switchTab('ats')">
+        <span class="tab-icon">🪙</span> ATS Tokenization
+      </button>
     </nav>
 
     <!-- TAB 1: Proposals -->
@@ -377,6 +380,161 @@
       </div>
     </main>
 
+    <!-- TAB 5: ATS Tokenization (factored-hedera sidecar test space) -->
+    <main id="tabAts" class="tab-content">
+      <div class="card glass-panel">
+        <div class="card-header">
+          <div>
+            <h2>ATS — Asset Tokenization Studio (Hedera Testnet)</h2>
+            <p class="card-desc">Test space for the on-chain lifecycle. Each step talks to the factored-hedera execution sidecar; seller and buyer actions live in separate panels below.</p>
+          </div>
+          <div class="status-indicator" id="atsStatusBadge">
+            <span class="status-dot"></span>
+            <span id="atsStatusText">Checking ATS service...</span>
+          </div>
+        </div>
+
+        <div class="ats-steps">
+          <div class="ats-step done">1 · Confirmations (selfie)</div>
+          <div class="ats-step active">2 · Register receivable</div>
+          <div class="ats-step">3 · Operator / allowance</div>
+          <div class="ats-step">4 · Execute trade (tokenize + settle)</div>
+          <div class="ats-step">5 · Maturity &amp; redemption</div>
+        </div>
+      </div>
+
+      <div class="grid-2col">
+        <!-- ATS SELLER PANEL -->
+        <section class="card glass-panel">
+          <div class="card-header">
+            <h2>Seller Panel — Step 2</h2>
+            <span class="badge badge-primary">Register receivable</span>
+          </div>
+          <p class="card-desc">Register a confirmed proposal as an on-chain receivable. The proposal must be ACCEPTED with the buyer's signature and your selfie check completed.</p>
+
+          <form id="atsRegisterForm" onsubmit="handleAtsRegister(event)">
+            <div class="form-group">
+              <label for="atsProposalSelect">Confirmed proposal</label>
+              <select id="atsProposalSelect" required onchange="updateAtsProceedsDefault()"></select>
+              <small class="field-hint">✅ fully confirmed · 🟡 accepted, confirmations incomplete · ⬜ pending</small>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="atsSupplierAccount">Seller Hedera account</label>
+                <input type="text" id="atsSupplierAccount" placeholder="0.0.10446661" required />
+                <small class="field-hint">Testnet test supplier: 0.0.10446661</small>
+              </div>
+              <div class="form-group">
+                <label for="atsMinProceeds">Minimum proceeds (USD)</label>
+                <input type="number" id="atsMinProceeds" min="1" step="0.01" placeholder="Auto = requested advance" />
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="ats-check">
+                <input type="checkbox" id="atsForceConfirm" />
+                Skip confirmation gate (testnet demo only)
+              </label>
+            </div>
+
+            <button class="btn btn-primary" type="submit">
+              🪙 Register on ATS
+            </button>
+            <span id="atsRegisterSpinner" class="spinner hidden"></span>
+
+            <div id="atsRegisterResult" class="alert-box hidden"></div>
+          </form>
+
+          <div class="ats-section-divider">Step 3 · Operator authorization <small>(once per security)</small></div>
+          <form id="atsAuthorizeForm" onsubmit="handleAtsAuthorize(event)">
+            <div class="form-group">
+              <label for="atsAuthProposalSelect">Registered receivable</label>
+              <select id="atsAuthProposalSelect" required></select>
+            </div>
+            <div class="form-group">
+              <label for="atsSecurityId">Security ID</label>
+              <input type="text" id="atsSecurityId" placeholder="0.0.10446844" required />
+              <small class="field-hint">Pre-existing security to authorize against (sidecar testnet fixture: 0.0.10446844). Trade execution self-authorizes its own security.</small>
+            </div>
+            <button class="btn btn-secondary" type="submit">🛡️ Authorize operator</button>
+            <span id="atsAuthorizeSpinner" class="spinner hidden"></span>
+            <div id="atsAuthorizeResult" class="alert-box hidden"></div>
+          </form>
+        </section>
+
+        <!-- ATS BUYER PANEL -->
+        <section class="card glass-panel">
+          <div class="card-header">
+            <h2>Buyer Panel — Step 2</h2>
+            <span class="badge badge-warning">Read-only for now</span>
+          </div>
+          <p class="card-desc">Receivables registered on-chain so far. Buying (authorize → execute → payout) activates in the next steps.</p>
+
+          <div id="atsRegistrationsLoading" class="field-hint">Loading registrations…</div>
+          <div id="atsRegistrationsList"></div>
+
+          <div class="ats-section-divider">Step 4 · USDC allowance <small>(investor → operator)</small></div>
+          <form id="atsAllowanceForm" onsubmit="handleAtsAllowance(event)">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="atsInvestorAccount">Investor Hedera account</label>
+                <input type="text" id="atsInvestorAccount" placeholder="0.0.10476670" required />
+                <small class="field-hint">Testnet test investor: 0.0.10476670</small>
+              </div>
+              <div class="form-group">
+                <label for="atsAllowanceAmount">Amount (USD)</label>
+                <input type="number" id="atsAllowanceAmount" min="1" step="0.01" placeholder="Auto = purchase price" />
+              </div>
+            </div>
+            <button class="btn btn-secondary" type="submit">💵 Approve USDC allowance</button>
+            <span id="atsAllowanceSpinner" class="spinner hidden"></span>
+            <div id="atsAllowanceResult" class="alert-box hidden"></div>
+          </form>
+
+          <div class="ats-section-divider">Step 5 · Execute trade <small>(tokenize → settle → schedule payout)</small></div>
+          <form id="atsExecuteForm" onsubmit="handleAtsExecute(event)">
+            <div class="form-group">
+              <label for="atsExecuteProposalSelect">Registered receivable</label>
+              <select id="atsExecuteProposalSelect" required onchange="updateAtsExecuteDefaults()"></select>
+            </div>
+            <div class="form-group">
+              <label for="atsPurchasePrice">Purchase price (USD)</label>
+              <input type="number" id="atsPurchasePrice" min="1" step="0.01" placeholder="Auto = minimum proceeds" />
+            </div>
+            <button class="btn btn-primary" type="submit">⚡ Execute trade on Hedera</button>
+            <span id="atsExecuteSpinner" class="spinner hidden"></span>
+            <div id="atsExecuteResult" class="alert-box hidden"></div>
+          </form>
+
+          <div class="ats-section-divider">Step 6 · Maturity &amp; redemption</div>
+          <form id="atsMaturityForm" onsubmit="return false">
+            <div class="form-group">
+              <label for="atsMaturityProposalSelect">Funded receivable</label>
+              <select id="atsMaturityProposalSelect" required onchange="updateAtsMaturityDefaults()"></select>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="atsDebtorTxId">Debtor payment tx reference</label>
+                <input type="text" id="atsDebtorTxId" placeholder="tx id / bank reference" />
+              </div>
+              <div class="form-group">
+                <label for="atsDebtorAmount">Debtor payment amount (USD)</label>
+                <input type="number" id="atsDebtorAmount" min="1" step="0.01" placeholder="Auto = face value" />
+              </div>
+            </div>
+            <div class="ats-btn-row">
+              <button class="btn btn-secondary" type="button" onclick="handleAtsCheckMaturity()">🔍 Check maturity</button>
+              <button class="btn btn-secondary" type="button" onclick="handleAtsConfirmPayment(event)">✅ Confirm debtor payment</button>
+              <button class="btn btn-primary" type="button" onclick="handleAtsRedeem(event)">🏁 Redeem at maturity</button>
+            </div>
+            <span id="atsMaturitySpinner" class="spinner hidden"></span>
+            <div id="atsMaturityResult" class="alert-box hidden"></div>
+          </form>
+        </section>
+      </div>
+    </main>
+
     <!-- Footer -->
     <footer class="footer">
       <p>Factora / ClaimFlow &bull; Local Testing Environment &bull; Port: 3000</p>
@@ -428,6 +586,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=7"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>

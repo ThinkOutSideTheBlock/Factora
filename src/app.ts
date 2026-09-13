@@ -8,6 +8,7 @@ import { buyerRouter } from './buyer/buyer.controller.js';
 import { agentRouter } from './agent/agent.controller.js';
 import { worldRouter } from './world/world.controller.js';
 import { graphRouter } from './graph/graph.controller.js';
+import { atsRouter } from './hedera/ats.controller.js';
 import { paymentMiddleware } from '@x402/express';
 import {
   buildX402Routes,
@@ -22,6 +23,7 @@ const log = createLogger('http');
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PUBLIC_DIR = path.resolve(__dirname, '../public');
+const FRONTEND_DIR = path.resolve(__dirname, '../frontend');
 
 export const app: Express = express();
 
@@ -66,9 +68,13 @@ app.use((req, res, next) => {
   next();
 });
 
-// Serve static frontend assets. `no-cache` forces revalidation on every load
-// (still 304-efficient), so UI updates land with a normal reload.
-app.use(express.static(PUBLIC_DIR, {
+// Serve the new frontend at the root. The legacy dashboard remains available
+// under /legacy (reference / rollback). `no-cache` forces revalidation on
+// every load (still 304-efficient), so UI updates land with a normal reload.
+app.use('/legacy', express.static(PUBLIC_DIR, {
+  setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
+}));
+app.use(express.static(FRONTEND_DIR, {
   setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
 }));
 
@@ -99,6 +105,7 @@ app.use('/api/matchmaking', buyerRouter); // Alias for compatibility with plan
 app.use('/api/agent', agentRouter);
 app.use('/api/graph', graphRouter); // Paid standalone graph analytics (x402)
 app.use('/api/world', worldRouter); // World ID Selfie Check (Beta) verification
+app.use('/api/ats', atsRouter); // ATS (factored-hedera sidecar) lifecycle test space
 
 // Central error handler — logs the cause, returns clean JSON. Also converts
 // body-parser's HTML error pages (e.g. malformed JSON) into API errors.

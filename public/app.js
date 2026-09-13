@@ -31,6 +31,10 @@ function switchTab(tabId) {
   } else if (tabId === 'graph') {
     document.getElementById('tabBtnGraph').classList.add('active');
     document.getElementById('tabGraph').classList.add('active');
+  } else if (tabId === 'ats') {
+    document.getElementById('tabBtnAts').classList.add('active');
+    document.getElementById('tabAts').classList.add('active');
+    refreshAtsPanels();
   }
 }
 
@@ -1642,6 +1646,423 @@ function renderGraphInsights(data, settlement) {
   outputEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+// ── ATS Tokenization test space (factored-hedera sidecar) ───────────────────
+
+let atsProposalsCache = [];
+
+function setAtsStatus(connected, detail) {
+  const badge = document.getElementById('atsStatusBadge');
+  const text = document.getElementById('atsStatusText');
+  if (!badge || !text) return;
+  badge.className = 'status-indicator ' + (connected ? 'online' : 'offline');
+  text.textContent = connected ? 'ATS service online' : 'ATS service offline';
+  if (detail) text.textContent += ` · ${detail}`;
+}
+
+async function checkAtsHealth() {
+  try {
+    const res = await fetch('/api/ats/health');
+    const data = await res.json();
+    setAtsStatus(
+      Boolean(data.connected),
+      data.connected ? data.service : (data.error || 'start the sidecar (hedera/ → port 3001)')
+    );
+  } catch {
+    setAtsStatus(false);
+  }
+}
+
+function atsProposalReady(p) {
+  return p.status === 'ACCEPTED' && p.buyerSignature && p.selfieCheck;
+}
+
+function atsProposalDot(p) {
+  if (atsProposalReady(p)) return '✅';
+  return p.status === 'ACCEPTED' ? '🟡' : '⬜';
+}
+
+async function loadAtsSellerOptions() {
+  const select = document.getElementById('atsProposalSelect');
+  if (!select) return;
+  try {
+    const res = await fetch('/api/proposals');
+    const data = await res.json();
+    atsProposalsCache = (data.proposals || [])
+      .slice()
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    const previous = select.value;
+    select.innerHTML = '';
+    if (!atsProposalsCache.length) {
+      select.innerHTML = '<option value="">No proposals yet</option>';
+      return;
+    }
+    atsProposalsCache.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent =
+        `${atsProposalDot(p)} ${p.debtDocument.debtorCompany} · ` +
+        `$${Number(p.debtDocument.faceValue).toLocaleString()} face · ` +
+        `due ${p.debtDocument.dueDate}`;
+      select.appendChild(opt);
+    });
+    if (previous && atsProposalsCache.some(p => p.id === previous)) {
+      select.value = previous;
+    }
+    updateAtsProceedsDefault();
+  } catch {
+    select.innerHTML = '<option value="">Failed to load proposals</option>';
+  }
+}
+
+function updateAtsProceedsDefault() {
+  const select = document.getElementById('atsProposalSelect');
+  const proceedsEl = document.getElementById('atsMinProceeds');
+  if (!select || !proceedsEl || !atsProposalsCache.length) return;
+  const proposal = atsProposalsCache.find(p => p.id === select.value);
+  if (proposal && !proceedsEl.dataset.dirty) {
+    proceedsEl.value = proposal.requiredAmount;
+  }
+}
+
+async function handleAtsRegister(e) {
+  e.preventDefault();
+  const select = document.getElementById('atsProposalSelect');
+  const accountEl = document.getElementById('atsSupplierAccount');
+  const proceedsEl = document.getElementById('atsMinProceeds');
+  const forceEl = document.getElementById('atsForceConfirm');
+  const resultEl = document.getElementById('atsRegisterResult');
+  const spinner = document.getElementById('atsRegisterSpinner');
+
+  if (!select.value) return;
+  const payload = {
+    proposalId: select.value,
+    supplierAccountId: accountEl.value.trim(),
+  };
+  if (proceedsEl.value) {
+    payload.minimumProceedsUsd = parseFloat(proceedsEl.value);
+  }
+  if (forceEl.checked) payload.force = true;
+
+  // Remember the seller account for future registrations.
+  localStorage.setItem('factoraAtsSupplierAccount', accountEl.value.trim());
+
+  resultEl.classList.remove('hidden', 'success-box', 'error-box');
+  resultEl.textContent = 'Registering receivable on ATS…';
+  spinner.classList.remove('hidden');
+
+  try {
+    const res = await fetch('/api/ats/receivables', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      resultEl.classList.add('success-box');
+      resultEl.innerHTML =
+        `✅ Registered on ATS<br>` +
+        `receivable <strong>${escapeHtml(data.registration.receivableId)}</strong> · ` +
+        `status ${escapeHtml(data.registration.status)} · ` +
+        `face $${Number(data.registration.faceValueUsd).toLocaleString()} · ` +
+        `matures ${new Date(data.registration.maturityTimestamp * 1000).toISOString().slice(0, 10)}`;
+      loadAtsRegistrations();
+    } else {
+      resultEl.classList.add('error-box');
+      resultEl.textContent = `⚠️ ${data.message || data.error || 'Registration failed'}`;
+    }
+  } catch (err) {
+    resultEl.classList.add('error-box');
+    resultEl.textContent = `⚠️ Request failed: ${err.message || err}`;
+  } finally {
+    spinner.classList.add('hidden');
+  }
+}
+
+async function loadAtsRegistrations() {
+  const listEl = document.getElementById('atsRegistrationsList');
+  const loadingEl = document.getElementById('atsRegistrationsLoading');
+  if (!listEl) return;
+  try {
+    const res = await fetch('/api/ats/registrations');
+    const data = await res.json();
+    if (loadingEl) loadingEl.classList.add('hidden');
+
+    atsRegistrationsCache = data.registrations || [];
+    populateAtsRegistrationSelects();
+
+    if (!atsRegistrationsCache.length) {
+      listEl.innerHTML =
+        '<div class="empty-state"><span>🪙</span><p>No receivables registered yet. Register one from the seller panel.</p></div>';
+      return;
+    }
+
+    listEl.innerHTML = atsRegistrationsCache.map(r => `
+      <div class="ats-reg-card">
+        <div class="ats-reg-head">
+          <strong>${escapeHtml(r.debtorName)}</strong>
+          <span class="badge badge-primary">${escapeHtml(r.status)}</span>
+        </div>
+        <div class="ats-reg-meta">
+          <span>receivable <code>${escapeHtml(r.receivableId)}</code></span>
+          <span>invoice ${escapeHtml(r.invoiceNumber)}</span>
+          <span>face $${Number(r.faceValueUsd).toLocaleString()}</span>
+          <span>min proceeds $${Number(r.minimumProceedsUsd).toLocaleString()}</span>
+          <span>seller ${escapeHtml(r.supplierAccountId)}</span>
+          ${r.investorAccountId ? `<span>investor ${escapeHtml(r.investorAccountId)}</span>` : ''}
+          ${r.securityId ? `<span>security <code>${escapeHtml(r.securityId)}</code></span>` : ''}
+          <span>matures ${new Date(r.maturityTimestamp * 1000).toISOString().slice(0, 10)}</span>
+        </div>
+      </div>`).join('');
+  } catch {
+    if (loadingEl) loadingEl.classList.add('hidden');
+    listEl.innerHTML =
+      '<div class="empty-state"><span>⚠️</span><p>Could not load registrations (is the ATS sidecar running?).</p></div>';
+  }
+}
+
+let atsRegistrationsCache = [];
+
+const ATS_STATUS_DOT = {
+  REGISTERED: '🪙',
+  TOKENIZED: '🧱',
+  FUNDED: '💰',
+  REDEEMED: '🏁',
+  DEFAULTED: '⚠️',
+};
+
+function populateAtsRegistrationSelects() {
+  fillAtsSelect('atsAuthProposalSelect', atsRegistrationsCache, r => r.status === 'REGISTERED' || r.status === 'FUNDED');
+  fillAtsSelect('atsExecuteProposalSelect', atsRegistrationsCache, r => r.status === 'REGISTERED');
+  fillAtsSelect('atsMaturityProposalSelect', atsRegistrationsCache, r => r.status === 'FUNDED' || r.status === 'MATURED' || r.status === 'TOKENIZED');
+  updateAtsExecuteDefaults();
+  updateAtsMaturityDefaults();
+}
+
+function fillAtsSelect(selectId, items, filter) {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+  const usable = items.filter(filter);
+  const previous = select.value;
+  select.innerHTML = '';
+  if (!usable.length) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = usable === items ? 'No registrations yet' : `No registrations in this state (need ${filter === null ? 'any' : 'the right status'})`;
+    select.appendChild(opt);
+    return;
+  }
+  usable.forEach(r => {
+    const opt = document.createElement('option');
+    opt.value = r.proposalId;
+    opt.textContent =
+      `${ATS_STATUS_DOT[r.status] || '•'} ${r.debtorName} · ` +
+      `$${Number(r.faceValueUsd).toLocaleString()} face · ${r.status}`;
+    select.appendChild(opt);
+  });
+  if (previous && usable.some(r => r.proposalId === previous)) {
+    select.value = previous;
+  }
+}
+
+function findAtsRegistration(proposalId) {
+  return atsRegistrationsCache.find(r => r.proposalId === proposalId);
+}
+
+function updateAtsExecuteDefaults() {
+  const select = document.getElementById('atsExecuteProposalSelect');
+  const priceEl = document.getElementById('atsPurchasePrice');
+  const r = findAtsRegistration(select && select.value);
+  if (r && priceEl && !priceEl.dataset.dirty) {
+    priceEl.value = r.minimumProceedsUsd;
+  }
+}
+
+function updateAtsMaturityDefaults() {
+  const select = document.getElementById('atsMaturityProposalSelect');
+  const amountEl = document.getElementById('atsDebtorAmount');
+  const r = findAtsRegistration(select && select.value);
+  if (r && amountEl && !amountEl.dataset.dirty) {
+    amountEl.value = r.faceValueUsd;
+  }
+}
+
+// ── ATS steps 3–6 handlers ───────────────────────────────────────────────────
+
+function atsSetResult(elementId, ok, text) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  el.classList.remove('hidden', 'success-box', 'error-box');
+  el.classList.add(ok ? 'success-box' : 'error-box');
+  el.innerHTML = text;
+}
+
+function atsSpinner(elementId, show) {
+  const el = document.getElementById(elementId);
+  if (el) el.classList.toggle('hidden', !show);
+}
+
+async function atsPost(url, payload, { spinnerId, resultId, render }) {
+  atsSpinner(spinnerId, true);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+    const data = await res.json();
+    atsSetResult(resultId, res.ok, render(res.ok, data));
+    if (res.ok) loadAtsRegistrations();
+  } catch (err) {
+    atsSetResult(resultId, false, `⚠️ Request failed: ${err.message || err}`);
+  } finally {
+    atsSpinner(spinnerId, false);
+  }
+}
+
+// Step 3 — supplier authorizes the FACTORED operator on a security.
+async function handleAtsAuthorize(e) {
+  e.preventDefault();
+  const proposalId = document.getElementById('atsAuthProposalSelect').value;
+  const securityId = document.getElementById('atsSecurityId').value.trim();
+  if (!proposalId) return;
+  const registration = findAtsRegistration(proposalId);
+  if (!registration) {
+    atsSetResult('atsAuthorizeResult', false, '⚠️ Registration not found — reload the ATS tab.');
+    return;
+  }
+  await atsPost('/api/ats/suppliers/' + encodeURIComponent(registration.supplierAccountId) + '/authorize-operator', { proposalId, securityId }, {
+    spinnerId: 'atsAuthorizeSpinner',
+    resultId: 'atsAuthorizeResult',
+    render: (ok, data) => ok
+      ? `🛡️ Operator authorized${data.transactionId ? ` · tx <strong>${escapeHtml(String(data.transactionId))}</strong>` : ''}`
+      : `⚠️ ${data.message || data.error || 'Authorization failed'}`,
+  });
+}
+
+// Step 4 — investor approves the USDC allowance for the operator.
+async function handleAtsAllowance(e) {
+  e.preventDefault();
+  // Allowance is investor-side: target the registration selected in step 5
+  // (fall back to the step 3 selection) since it defines the purchase price.
+  const select = document.getElementById('atsExecuteProposalSelect');
+  const authSelect = document.getElementById('atsAuthProposalSelect');
+  const proposalId = select.value || authSelect.value;
+  if (!proposalId) return;
+  const investorAccountId = document.getElementById('atsInvestorAccount').value.trim();
+  localStorage.setItem('factoraAtsInvestorAccount', investorAccountId);
+  const amountRaw = document.getElementById('atsAllowanceAmount').value;
+  const payload = { proposalId, investorAccountId };
+  if (amountRaw) payload.amountUsd = parseFloat(amountRaw);
+  await atsPost('/api/ats/investors/' + encodeURIComponent(investorAccountId) + '/approve-usdc-allowance', payload, {
+    spinnerId: 'atsAllowanceSpinner',
+    resultId: 'atsAllowanceResult',
+    render: (ok, data) => ok
+      ? (data.mode === 'executed'
+          ? `💵 Allowance executed on testnet${data.transactionId ? ` · tx <strong>${escapeHtml(String(data.transactionId))}</strong>` : ''} · $${Number(data.amountUsd).toLocaleString()} to ${escapeHtml(String(data.spenderAccountId || 'operator'))}`
+          : `⚠️ Allowance built but NOT signed: ${escapeHtml(data.message || data.mode || 'unsigned')}`)
+      : `⚠️ ${data.message || data.error || 'Allowance failed'}`,
+  });
+}
+
+// Step 5 — execute the trade (tokenize → settle → schedule payout).
+async function handleAtsExecute(e) {
+  e.preventDefault();
+  const proposalId = document.getElementById('atsExecuteProposalSelect').value;
+  if (!proposalId) return;
+  const investorAccountId = document.getElementById('atsInvestorAccount').value.trim();
+  if (!investorAccountId) {
+    atsSetResult('atsExecuteResult', false, '⚠️ Enter the investor Hedera account in step 4 first.');
+    return;
+  }
+  localStorage.setItem('factoraAtsInvestorAccount', investorAccountId);
+  const priceRaw = document.getElementById('atsPurchasePrice').value;
+  const payload = { proposalId, investorAccountId };
+  if (priceRaw) payload.purchasePriceUsd = parseFloat(priceRaw);
+  await atsPost('/api/ats/trades/execute', payload, {
+    spinnerId: 'atsExecuteSpinner',
+    resultId: 'atsExecuteResult',
+    render: (ok, data) => {
+      if (!ok) return `⚠️ ${data.message || data.error || 'Execution failed'}`;
+      const s = data.settlement || {};
+      return `⚡ Trade executed — receivable FUNDED<br>` +
+        `security <strong>${escapeHtml(String(s.securityId || ''))}</strong>` +
+        `${s.scheduleId ? ` · payout scheduled <strong>${escapeHtml(String(s.scheduleId))}</strong>` : ''}<br>` +
+        `tokenize <code>${escapeHtml(String(s.tokenizationTxId || '—'))}</code> · ` +
+        `USDC <code>${escapeHtml(String(s.cashTransferTxId || '—'))}</code>`;
+    },
+  });
+}
+
+// Step 6a — read-only maturity check.
+async function handleAtsCheckMaturity() {
+  const proposalId = document.getElementById('atsMaturityProposalSelect').value;
+  if (!proposalId) return;
+  atsSpinner('atsMaturitySpinner', true);
+  try {
+    const res = await fetch('/api/ats/maturity/' + encodeURIComponent(proposalId) + '/check');
+    const data = await res.json();
+    atsSetResult('atsMaturityResult', res.ok,
+      res.ok
+        ? `🔍 maturityReached: <strong>${data.maturityReached}</strong> · ` +
+          `debtorPayment.confirmed: <strong>${data.debtorPayment && data.debtorPayment.confirmed}</strong> · ` +
+          `redemptionEligible: <strong>${data.redemptionEligible}</strong> · status ${escapeHtml(String(data.status || ''))}`
+        : `⚠️ ${data.message || data.error || 'Check failed'}`);
+  } catch (err) {
+    atsSetResult('atsMaturityResult', false, `⚠️ Request failed: ${err.message || err}`);
+  } finally {
+    atsSpinner('atsMaturitySpinner', false);
+  }
+}
+
+// Step 6b — confirm the debtor's payment (>= face value) → receivable MATURED.
+async function handleAtsConfirmPayment(e) {
+  e.preventDefault();
+  const proposalId = document.getElementById('atsMaturityProposalSelect').value;
+  if (!proposalId) return;
+  const transactionId = document.getElementById('atsDebtorTxId').value.trim();
+  if (!transactionId) {
+    atsSetResult('atsMaturityResult', false, '⚠️ Enter the debtor payment transaction reference first.');
+    return;
+  }
+  const amountRaw = document.getElementById('atsDebtorAmount').value;
+  const payload = { transactionId };
+  if (amountRaw) payload.amountUsd = parseFloat(amountRaw);
+  await atsPost('/api/ats/maturity/' + encodeURIComponent(proposalId) + '/confirm-payment', payload, {
+    spinnerId: 'atsMaturitySpinner',
+    resultId: 'atsMaturityResult',
+    render: (ok, data) => ok
+      ? `✅ Debtor payment confirmed — receivable MATURED, redemption unlocked`
+      : `⚠️ ${data.message || data.error || 'Confirmation failed'}`,
+  });
+}
+
+// Step 6c — redeem at maturity: REDEEMED or DEFAULTED (+ scheduled payout cancelled).
+async function handleAtsRedeem(e) {
+  e.preventDefault();
+  const proposalId = document.getElementById('atsMaturityProposalSelect').value;
+  if (!proposalId) return;
+  await atsPost('/api/ats/maturity/' + encodeURIComponent(proposalId) + '/redeem', {}, {
+    spinnerId: 'atsMaturitySpinner',
+    resultId: 'atsMaturityResult',
+    render: (ok, data) => {
+      if (!ok) return `⚠️ ${data.message || data.error || 'Redemption failed'}`;
+      const r = (data.result && data.result.redemption) || {};
+      return r.status === 'REDEEMED'
+        ? `🏁 REDEEMED — investor received face value on-chain` +
+          `${r.redemptionTransactionId ? ` · tx <strong>${escapeHtml(String(r.redemptionTransactionId))}</strong>` : ''}`
+        : `⚠️ DEFAULTED — debtor did not pay; scheduled payout cancelled` +
+          `${r.cancelledScheduleId ? ` (schedule ${escapeHtml(String(r.cancelledScheduleId))})` : ''}`;
+    },
+  });
+}
+
+function refreshAtsPanels() {
+  checkAtsHealth();
+  loadAtsSellerOptions();
+  loadAtsRegistrations();
+}
+
 // Init
 document.addEventListener('DOMContentLoaded', () => {
   checkServerHealth();
@@ -1653,8 +2074,20 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('myProposalsKeyInput').value = savedProposerKey;
     loadMyProposals();
   }
+  // ATS: restore the saved seller Hedera account for the test space.
+  const savedSupplierAccount = localStorage.getItem('factoraAtsSupplierAccount');
+  if (savedSupplierAccount) {
+    document.getElementById('atsSupplierAccount').value = savedSupplierAccount;
+  }
+  // ATS: restore the saved investor Hedera account (steps 4–6).
+  const savedInvestorAccount = localStorage.getItem('factoraAtsInvestorAccount');
+  if (savedInvestorAccount) {
+    document.getElementById('atsInvestorAccount').value = savedInvestorAccount;
+  }
+  checkAtsHealth();
   setInterval(checkServerHealth, 10000);
+  setInterval(checkAtsHealth, 15000);
   // Self-heal the status badges when the tab regains focus or connectivity.
-  window.addEventListener('focus', () => { checkServerHealth(); checkAgentStatus(); });
-  window.addEventListener('online', () => { checkServerHealth(); checkAgentStatus(); });
+  window.addEventListener('focus', () => { checkServerHealth(); checkAgentStatus(); checkAtsHealth(); });
+  window.addEventListener('online', () => { checkServerHealth(); checkAgentStatus(); checkAtsHealth(); });
 });

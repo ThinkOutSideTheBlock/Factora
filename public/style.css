@@ -1655,3 +1655,126 @@ input:focus,
   color: var(--accent-emerald);
   font-weight: 600;
 }
+
+/* ── ATS Tokenization test space ─────────────────────────────────────────── */
+
+.ats-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.ats-step {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.ats-step.done {
+  color: var(--accent-emerald);
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.ats-step.active {
+  color: var(--text-main);
+  border-color: var(--accent-primary);
+  background: rgba(99, 102, 241, 0.14);
+  box-shadow: var(--shadow-glow);
+}
+
+.ats-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-direction: row;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.ats-check input[type='checkbox'] {
+  width: auto;
+  accent-color: var(--accent-primary);
+}
+
+.ats-reg-card {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.ats-reg-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.ats-reg-head strong {
+  font-size: 0.9rem;
+}
+
+.ats-reg-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 0.74rem;
+  color: var(--text-dim);
+}
+
+.ats-reg-meta code {
+  font-family: var(--font-mono);
+  color: var(--accent-cyan);
+  font-size: 0.72rem;
+}
+
+.ats-buyer-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  margin-top: 14px;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+}
+
+.ats-buyer-placeholder span {
+  font-size: 1.4rem;
+}
+
+.ats-section-divider {
+  margin: 22px 0 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-color);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent-cyan);
+}
+
+.ats-section-divider small {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-dim);
+}
+
+.ats-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}

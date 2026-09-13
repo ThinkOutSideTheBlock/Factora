@@ -1,0 +1,39 @@
+{
+  "name": "factored-hedera-integration",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "FACTORED Hedera execution boundary: ATS tokenized receivables, HTS settlement, HCS audit, maturity workflow, and agent-facing API.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "bootstrap:hedera": "tsx scripts/bootstrap-hedera.ts",
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/hedera/unit",
+    "test:component": "vitest run tests/hedera/component",
+    "test:integration": "vitest run tests/hedera/integration",
+    "test:spike": "vitest run tests/hedera/spike",
+    "test:e2e": "vitest run tests/hedera/e2e",
+    "test:all-offline": "vitest run tests/hedera/unit tests/hedera/component",
+    "test:coverage": "vitest run --coverage",
+    "check:tree": "bash scripts/check-tree.sh"
+  },
+  "dependencies": {
+    "@hashgraph/asset-tokenization-sdk": "8.0.0",
+    "@hashgraph/sdk": "2.81.0",
+    "dotenv": "16.6.1",
+    "fastify": "5.6.1",
+    "zod": "4.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "24.4.0",
+    "@vitest/coverage-v8": "3.2.4",
+    "tsx": "^4.20.5",
+    "typescript": "5.9.2",
+    "vitest": "3.2.4"
+  }
+}

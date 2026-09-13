@@ -1,0 +1,22 @@
+[
+  {
+    "id": "33df932f-0978-42c9-972c-8dd802d8a0bb",
+    "proposalId": "1a00f5cb-4d0e-4066-96ee-8c284dd3827c",
+    "receivableId": "REC-1789274815670-305",
+    "supplierAccountId": "0.0.10446661",
+    "debtorName": "Northstar Foods Distribution Ltd.",
+    "invoiceNumber": "INV-2026-00421",
+    "faceValueUsd": 10000,
+    "minimumProceedsUsd": 9456,
+    "maturityTimestamp": 1798329599,
+    "status": "REGISTERED",
+    "registeredAt": "2026-09-13T04:46:55.671Z",
+    "investorAccountId": "0.0.10476670",
+    "usdcAllowance": {
+      "amountUsd": 9456,
+      "mode": "executed",
+      "transactionId": "0.0.10476670@1789274849.895862669",
+      "approvedAt": "2026-09-13T04:47:36.392Z"
+    }
+  }
+]
