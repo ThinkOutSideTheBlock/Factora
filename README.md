@@ -10,11 +10,7 @@
 
 Built for **ETHOnline 2026** 🏛️
 
----
 
-
-
----
 
 ## 🧩 The Problem
 
@@ -34,52 +30,7 @@ Factora turns invoice financing into an **autonomous, agent-to-agent marketplace
 
 No human coordination in the loop: agents find, evaluate, negotiate, and finance — end to end.
 
-### [SCREENSHOT OR GIF OF THE FACTORA FRONTEND — MARKETPLACE / SETTLEMENT VIEW]
 
----
-
-## 🏗️ Architecture
-
-```text
-                ┌─────────────────────────────────────────────────┐
-                │        Factora Frontend (port 3000)             │
-                │   Raise · Invest · Settlement · Dev Console     │
-                └───────────────────────┬─────────────────────────┘
-                                        │
-┌───────────────────────────────────────▼──────────────────────────────────┐
-│              Factora Main App — Express API (port 3000)                  │
-│                                                                          │
-│  Proposal Service      Buyer / Matchmaking        Underwriter Agent      │
-│  (debt documents,      (evaluate, negotiate,      (OpenAI-compatible    │
-│   economics)            finance receivables)       LLM, evidence-strict)│
-│        │                        │                      │                 │
-│        │                        │          ┌───────────▼───────────┐     │
-│        │                        │          │  The Graph Data Feed  │     │
-│        │                        │          │  Messari-standardized │     │
-│        │                        │          │  subgraphs + MCP      │     │
-│        │                        │          └───────────────────────┘     │
-│        │                        │                                        │
-│  ┌─────▼────────────────────────▼──────────────────────────────────┐    │
-│  │        x402 Payment Gate (Hedera · Blocky402 facilitator)       │    │
-│  │   "exact" scheme · HTS/HBAR settlement · on-chain receipts      │    │
-│  └─────────────────────────────────────────────────────────────────┘    │
-│  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │        World ID — Selfie Check gate (/api/world)                │    │
-│  └─────────────────────────────────────────────────────────────────┘    │
-└───────────────────────────────────────┬──────────────────────────────────┘
-                                        │ HEDERA_SERVICE_URL (HTTP)
-┌───────────────────────────────────────▼──────────────────────────────────┐
-│         factored-hedera Sidecar — Execution Boundary (port 3001)         │
-│                                                                          │
-│   ATS (Asset Tokenization Studio) lifecycle:                             │
-│   register → LISTED → UNDERWRITING → APPROVED → TOKENIZED →              │
-│   trade → party confirmations → settlement/clearing → maturity           │
-│                                                                          │
-│   @hashgraph/asset-tokenization-sdk · @hashgraph/sdk · HCS audit trail   │
-└───────────────────────────────────────┬──────────────────────────────────┘
-                                       
-                                  
-```
 
 ## 🤖 The Agents
 
@@ -91,26 +42,10 @@ No human coordination in the loop: agents find, evaluate, negotiate, and finance
 
 ---
 
-
-### 1️⃣ World ID — Selfie Check 
-
-We use **World ID Selfie Check** as the identity-verification gate for creating proposals on Factora:
-
-- A completed Selfie Check acts as an **anti-abuse / anti-Sybil signal** on debt proposals — a verified proposer is a real, live human, not a scripted bot mass-listing fake invoices.
-- It feeds directly into **risk evaluation** — verification status is surfaced to the Underwriter Agent as an eligibility signal on the debt proposal.
-- **The full flow was walked end-to-end** (RP-initiated challenge → sandbox selfie verification → World ID proof → verified proposal) during development and in the demo.
-
-📝 **Developer feedback on integrating the Selfie Check API / Sandbox:** [WORLD ID FEEDBACK LINK]
-
-### 2️⃣ Hedera — AI & Agentic Payments on Hedera 
-
-Factora's core APIs are a **gated service** — every meaningful call costs money, and **agents pay autonomously**:
-
-- **x402 protocol on Hedera** with the `exact` scheme: unauthenticated calls get a `402 Payment Required` challenge; the payer agent retries with `X-PAYMENT`; the **Blocky402 facilitator verifies, co-signs as fee payer, and settles on-chain**.
-- **Agent-to-agent (A2A)** interaction: the Payer Agent pays for underwriting, smart reports, and market intelligence **per call — no API keys, no subscriptions**.
-- Settlement is **HTS/HBAR-based**, and every payment produces an **on-chain receipt** surfaced in the response and streamed to the UI/terminal — fully transparent on the **Hedera Testnet**.
-
-### 3️⃣ Hedera — Tokenization of Anything 
+## Diagram
+<p align="center">
+  <img src="./diagram.png" alt="Factora — Invoice Factoring × Blockchain × AI" width="1000" />
+</p>
 
 ## Architecture
 
@@ -230,7 +165,7 @@ No agent ever constructs an ATS request, signs a Hedera transaction, or knows a 
 exists. That boundary is deliberate: it's what lets "AI proposes and negotiates, Hedera
 executes" hold as a real guarantee rather than a slogan.
 
-```
+
 
 ## What ATS gave us for free vs. what we built
 
@@ -241,23 +176,6 @@ per-security bootstrap that makes a brand-new bond usable without manual setup, 
 non-custodial operator-authorization model for suppliers, the HTS allowance-based cash leg, the
 Scheduled Transaction payout mechanism, and the full HCS audit taxonomy tying every step back
 to the human-confirmed deal that authorized it.
-
-
-### 4️⃣ The Graph — Best Use of Composable or Standardized Graph Products
-
-Factora's risk engine runs on **live** The Graph data, in two composed engines:
-
-- **Engine A — Standardized:** ONE shared GraphQL query pattern against **Messari-standardized lending subgraphs** (Aave v3, Compound v3, Morpho Blue, Spark) for live USDC/USDT/DAI supply APYs — the shared schema means a new protocol is a **one-line config entry** (proved when Morpho Blue was added with **zero query changes**).
-- **Engine B — Composable (MCP):** the **Subgraph MCP server** discovers and queries *any* of ~15,000 subgraphs at runtime, returning **additive yield opportunities** beyond the standardized baseline, and powering Uniswap v3 DEX liquidity yields the lending schema can't express.
-
-These engines set the **hurdle rate** the Underwriter Agent uses to price invoices: financing capital has a real, live alternative yield cost.
-
-### 5️⃣ The Graph — Best AI Tooling or AI Use Case with The Graph — Net-New
-
-Factora is a **net-new agentic use case** for The Graph: it is the **primary live blockchain data source for the AI Underwriter Agent's autonomous pricing decisions**:
-
-- The agent queries standardized benchmarks + MCP-discovered opportunities **as tool calls** (`searchSubgraphs`, `querySubgraph`, `getDynamicYieldOpportunities`) with OpenAI-compatible JSON Schema tool definitions — pluggable into any LLM host.
-- The Graph data is **layered** into underwriting: market data grounds the hurdle rate, while the LLM applies it to the specific debt document — under a strict "never invent external facts" evidence contract.
 
 ---
 
