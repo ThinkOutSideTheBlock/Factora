@@ -121,11 +121,136 @@ Factora's core APIs are a **gated service** — every meaningful call costs mone
 
 ### 3️⃣ Hedera — Tokenization of Anything 
 
-The `hedera/` sidecar tokenizes **business receivables / cashflow** using Hedera's **Asset Tokenization Studio (ATS)**:
+## Architecture
 
-- Full lifecycle: **Issuance → Compliance Check (KYC credential, DID-based authorization) → Trade (party confirmations) → Settlement/Clearing → maturity workflow**.
-- All state transitions are executed and auditable **on the Hedera Testnet** (HCS audit trail).
-- The sidecar is a strict execution boundary: the main app never touches the chain directly — all blockchain calls flow through it.
+```
+Supplier Agent          Investor Agent
+      |                       |
+      +---------+-------------+
+                |
+      Off-chain negotiation (not in this section)
+                |
+   supplierConfirmation + investorConfirmation
+   (same offerId, same price, own account ids)
+                |
+                v
+       assertDealConfirmed()  ← stops here on any mismatch, before Hedera
+                |
+                v
+     ══════════ HEDERA SECTION STARTS HERE ══════════
+                |
+      HCS: DEAL_CONFIRMED (immutable proof of mutual agreement)
+                |
+                v
+        ATS Bond.create()  → new security for this receivable
+                |
+                v
+   bootstrapSecurityForOperator()
+   grants ISSUER_ROLE, KYC_ROLE, CLEARING_VALIDATOR_ROLE,
+   SSI_MANAGER_ROLE, ROLE_CLEARING, ROLE_MATURITY_REDEEMER
+   + registers operator as SSI credential issuer
+   (every new security is its own contract; nothing carries
+    over from a prior bond — this runs once per security)
+                |
+                v
+      KYC grant → supplier (real Terminal3 VC, required
+      before issuance since internalKyc is active)
+                |
+                v
+        Issue 1 unit → SUPPLIER (initial holder)
+                |
+                v
+   Supplier authorizes operator (authorizeOperator +
+   authorizeOperatorByPartition) — one-time per security,
+   required before the operator can move the supplier's
+   tokens on their behalf during clearing
+                |
+                v
+      KYC grant → investor (real Terminal3 VC)
+                |
+                v
+   Clearing INITIATE (operator-from mode, supplier as source)
+                |
+                v
+   Clearing APPROVE (validator role) → note moves to INVESTOR
+                |
+                v
+   USDC settlement: purchase price, investor → supplier
+   (HTS allowance-based transfer; investor never hands
+    custody to FACTORED, only pre-approves a ceiling)
+                |
+                v
+   Scheduled Transaction: investor's face-value payout,
+   pre-signed now, set to execute automatically at the
+   maturity timestamp (see "Scheduled Transactions" below)
+                |
+                v
+      HCS: full audit trail across every step above
+                |
+                v
+     ══════════ (LATER, AT MATURITY) ══════════
+                |
+   Debtor payment confirmed?
+     NO  → cancel the scheduled payout before it fires,
+           write DEFAULT_DETECTED to HCS
+     YES → deactivate clearing (ROLE_CLEARING; required
+           precondition for redemption), then
+           Bond.fullRedeemAtMaturity() burns the investor's
+           note — the scheduled payout above already paid
+           them, or is about to, independent of this step
+```
+
+
+## Scheduled Transactions 
+
+The investor's face-value payout at maturity is a real Hedera **Scheduled Transaction**, not a
+cron job hitting a plain transfer. It's created and fully signed at the moment the primary sale
+settles — with `waitForExpiry(true)` and `expirationTime` set to the receivable's maturity
+timestamp — which means Hedera's own consensus nodes execute the payout automatically, with no
+live process required, if the debtor pays on time. If the debtor defaults, the schedule is
+cancelled (`ScheduleDeleteTransaction`) before its expiration, using an admin key set at
+creation for exactly that purpose. This also produces a complete, timestamped, on-chain audit
+trail (HCS + the schedule's own execution record) of exactly when a payment obligation was
+created and exactly when — or whether — it was honored.
+
+## Agent integration surface
+
+Agents (supplier-side and investor-side) never touch Hedera directly — this is the entire
+contract between the negotiation layer and this section:
+
+```
+POST /api/trades/execute
+  Body: ApprovedTrade — receivable terms + supplierConfirmation + investorConfirmation
+  → 200 SettlementResult (securityId, every transaction id, scheduleId, audit trail)
+  → 409 deal confirmations don't match — negotiation bug, not a Hedera issue
+  → 424 supplier hasn't authorized the operator on this security yet
+  → 503 Hedera execution not enabled / not ready
+
+POST /api/suppliers/:accountId/authorize-operator
+  Body: { securityId }
+  → one-time per new security
+
+POST /api/investors/:accountId/approve-usdc-allowance
+  Body: { amountUsd }
+  → one-time (or refreshed) per investor
+```
+
+No agent ever constructs an ATS request, signs a Hedera transaction, or knows a role hash
+exists. That boundary is deliberate: it's what lets "AI proposes and negotiates, Hedera
+executes" hold as a real guarantee rather than a slogan.
+
+```
+
+## What ATS gave us for free vs. what we built
+
+ATS provides the regulated-security primitives: bond issuance, partition-based clearing,
+on-chain KYC enforcement, SSI-based credential verification, and maturity redemption. What
+FACTORED's Hedera section adds on top: the deal-confirmation gate before any token exists, the
+per-security bootstrap that makes a brand-new bond usable without manual setup, the
+non-custodial operator-authorization model for suppliers, the HTS allowance-based cash leg, the
+Scheduled Transaction payout mechanism, and the full HCS audit taxonomy tying every step back
+to the human-confirmed deal that authorized it.
+
 
 ### 4️⃣ The Graph — Best Use of Composable or Standardized Graph Products
 
