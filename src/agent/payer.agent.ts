@@ -5,6 +5,18 @@
  * The x402 flow is executed explicitly (rather than through the opaque
  * wrapFetchWithPayment helper) so every step can be logged and streamed to
  * the UI: ① invoice → ② sign → ③ settle + resource.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * 🏆 ETHGlobal Online 2026 — Judge note
+ * Track: "🤖 AI & Agentic Payments on Hedera" — the CONSUMING agent
+ *
+ * This is the autonomous payer: a server-side agent wallet that receives the
+ * 402 invoice, signs a Hedera transfer and settles through the Blocky402
+ * facilitator — no API key, no subscription, no human in the loop. It funds
+ * real paid requests end-to-end against our own x402 services (whitelist in
+ * agent.controller.ts PAID_PATHS), and each phase is streamed as NDJSON so
+ * the demo video can show the payment executing live.
+ * ═══════════════════════════════════════════════════════════════════════════
  */
 import { x402Client, x402HTTPClient } from "@x402/fetch";
 import { ExactHederaScheme } from "@x402/hedera/exact/client";

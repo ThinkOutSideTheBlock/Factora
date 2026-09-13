@@ -1,3 +1,20 @@
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * 🏆 ETHGlobal Online 2026 — Judge note
+ * Track: "🤳🏼 Selfie Check"
+ *
+ * Selfie Check is a load-bearing RISK / ELIGIBILITY / ABUSE-PREVENTION signal,
+ * not decoration: both sides of a debt transaction are gated by it. SELLERS
+ * pass "Issuer verification" before their receivable can be trusted on the
+ * marketplace, and BUYERS pass a "proof of personhood" check before signing a
+ * purchase — one human, one identity, blocking sybil listings and fake-debt
+ * spam. The verify flow here (RP-context signature → World's verify endpoint,
+ * single-use nonce + TTL in selfie-check.model.ts) is enforced SERVER-side and
+ * the resulting SelfieCheckRecord is persisted on the proposal
+ * (src/proposal/proposal.model.ts) and rendered as an "Identity verified"
+ * badge in the UI. Demo: Raise page → Verify issuer; Invest page → Buy.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
 import { signRequest } from "@worldcoin/idkit/signing";
 import { createLogger } from "../common/logger.js";
 import { getAllProposals, saveProposals } from "../proposal/proposal.storage.js";

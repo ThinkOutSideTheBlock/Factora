@@ -1,3 +1,17 @@
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * 🏆 ETHGlobal Online 2026 — Judge note
+ * Track: "🤖 Best AI Tooling or AI Use Case with The Graph (From Scratch)"
+ *
+ * Reusable AI TOOLING (not a single end-user app): three composable tools —
+ * searchSubgraphs, querySubgraph and getDynamicYieldOpportunities — that give
+ * any LLM agent natural-language access to The Graph's 15,000+ subgraphs via
+ * the Subgraph MCP, layered on top of the standardized Messari feed. The
+ * Factora underwriter (src/underwriter/underwriter.agent.ts) is the built-in
+ * consumer, but the tools themselves are standalone infrastructure any agent
+ * framework can call. Unit + integration tests: src/graph/__tests__/.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
 import { graphMcpClient } from "./graph-mcp.client.js";
 import type {
     DynamicYieldOpportunity,

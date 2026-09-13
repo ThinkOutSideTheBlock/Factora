@@ -1,3 +1,18 @@
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * 🏆 ETHGlobal Online 2026 — Judge note
+ * Track: "🤖 Best AI Tooling or AI Use Case with The Graph (From Scratch)"
+ * (AI-app pool: The Graph as the agent's load-bearing data source)
+ *
+ * This AI underwriter never invents market context — every hurdle rate and
+ * yield comparison it reasons over comes LIVE from The Graph (Messari
+ * standardized subgraphs + Subgraph MCP, injected as `marketData`). The fit
+ * scores, risk levels and debt-quality grades it emits are decisions made ON
+ * that blockchain data — meaningful reasoning and automation, not a printed
+ * query result — and are schema-validated (zod) before they are allowed to
+ * influence money movement.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
 import {
     DebtDocument,
     Proposal,

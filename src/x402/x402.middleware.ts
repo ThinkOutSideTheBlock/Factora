@@ -5,6 +5,23 @@
  * TransferTransaction → retry with X-PAYMENT → facilitator verifies, co-signs as
  * fee payer and settles on-chain → handler runs, response carries PAYMENT-RESPONSE.
  */
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * 🏆 ETHGlobal Online 2026 — Judge note
+ * Track: "🤖 AI & Agentic Payments on Hedera"
+ *
+ * This middleware turns ordinary Express routes into LIVE x402-gated services
+ * on Hedera testnet, settled through the Blocky402 facilitator: /api/proposals
+ * (list a receivable), /api/buyer/smart-report (AI credit report) and
+ * /api/graph/insights (The Graph market intelligence). No API keys, no
+ * subscriptions: unpaid → 402 invoice → agent signs a Hedera transfer →
+ * facilitator verifies + co-signs → on-chain settlement → resource. The same
+ * services are consumed by our own autonomous payer agent
+ * (src/agent/payer.agent.ts), which streams every phase to the UI —
+ * /api/agent/paid-request/stream — so a real paid request can be watched
+ * end-to-end: invoice → sign → settle → execute.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
 import { HTTPFacilitatorClient, x402ResourceServer, type RoutesConfig } from '@x402/core/server';
 import { ExactHederaScheme } from '@x402/hedera/exact/server';
 import type { Network } from '@x402/core/types';

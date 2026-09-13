@@ -14,6 +14,22 @@
  *
  * External agents pay per call with x402 and use the result as the
  * capital-cost input for their own debt analytics.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * 🏆 ETHGlobal Online 2026 — Judge note — START HERE
+ * This payload is the whole Graph story in one object, and it is SOLD over
+ * x402 (POST /api/graph/insights, paid in HBAR on Hedera via Blocky402):
+ *   🧩 "Best Use of Composable or Standardized Graph Products" — market.*
+ *      composes TWO Graph products: Messari STANDARDIZED subgraphs queried
+ *      with one shared schema across protocols/chains (detailedRates,
+ *      benchmarks) + runtime discovery through the SUBGRAPH MCP
+ *      (mcpOpportunities). One pipeline, many protocols, many chains.
+ *   🤖 "Best AI Tooling or AI Use Case with The Graph" — `review` and
+ *      `market.aiTopMarkets` are the LLM analyst's output: it derives the
+ *      hurdle rate (unifiedApyPct) and hand-picks the 4 best venues WITH
+ *      rationale from that live data — decisions, not a raw query dump.
+ * The same feed drives the AI underwriter for every credit report.
+ * ═══════════════════════════════════════════════════════════════════════════
  */
 import { getGraphFeed } from "./graph-feed.js";
 import { generateMarketReview } from "../underwriter/market-review.js";

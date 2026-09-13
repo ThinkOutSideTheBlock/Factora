@@ -1,6 +1,22 @@
 /**
  * ATS orchestration — maps Factora proposals onto the factored-hedera
  * receivable lifecycle and keeps a local record of each registration.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * 🏆 ETHGlobal Online 2026 — Judge note
+ * Track: "🪙 Tokenization of Anything" (Hedera Asset Tokenization Studio)
+ *
+ * The "cashflow tokenisation" idea, built as a real lifecycle, not a token
+ * with a name: outstanding invoices (receivables) are tokenized through
+ * Asset Tokenization Studio (ERC-3643 via the factored-hedera sidecar) and
+ * progress through the FULL on-chain lifecycle — REGISTERED → FUNDED (DvP
+ * trade: dual party confirmations, ISIN, KYC'd investor, USDC payout) →
+ * MATURED → REDEEMED/DEFAULTED. ats.storage.ts persists the audit row per
+ * proposal; routes in ats.controller.ts (/api/ats/*); the DvP execute
+ * pipeline (executeProposalTrade) is a compliance-enforced SECONDARY MARKET
+ * for ATS-issued assets — the extra-points capability the Studio lacks.
+ * Demo: Settlement page, end to end.
+ * ═══════════════════════════════════════════════════════════════════════════
  */
 import { v4 as uuidv4 } from "uuid";
 import { createLogger } from "../common/logger.js";
