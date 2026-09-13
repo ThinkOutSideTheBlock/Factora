@@ -236,13 +236,13 @@ npm run test:e2e               # full end-to-end lifecycle
 
 ## 👥 Team
 
-**[TEAM NAME]** — ETHOnline 2026
+**FACTORA Team** — ETHOnline 2026
 
 | Name | Role | Contact |
 |------|------|---------|
-| [NAME 1] | [ROLE — e.g. AI/Agents] | [GITHUB / LINKEDIN] |
-| [NAME 2] | [ROLE — e.g. Hedera/Backend] | [GITHUB / LINKEDIN] |
-| [NAME 3] | [ROLE — e.g. Frontend] | [GITHUB / LINKEDIN] |
+| emtothed | AI Agent/Backend/Frontend | https://github.com/emtothed |
+| ThinkOutSideTheBlock | Hedera/Backend | https://github.com/ThinkOutSideTheBlock |
+| 0xDecentralizer | The Graph/Backend | https://github.com/0xDecentralizer |
 
 ## 📄 License
 
