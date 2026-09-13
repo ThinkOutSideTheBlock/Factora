@@ -12,7 +12,7 @@ Built for **ETHOnline 2026** 🏛️
 
 ---
 
-🎬 **[DEMO VIDEO LINK]** · 🌐 **[LIVE DEMO LINK]**
+
 
 ---
 
@@ -30,7 +30,7 @@ Factora turns invoice financing into an **autonomous, agent-to-agent marketplace
 2. The **AI Underwriter Agent** reviews the debt document, prices the risk, and sets a **hurdle rate from live DeFi market data** (The Graph).
 3. The **Buyer / Investor Agent** evaluates listed proposals, negotiates discount terms, and decides whether to finance.
 4. Agents pay each other **per API call with zero API keys or subscriptions** via the **x402 protocol on Hedera** (settled through the Blocky402 facilitator).
-5. The financed receivable is **tokenized on-chain** with Hedera's **Asset Tokenization Studio (ATS)** — issuance → compliance → trade → settlement — all verifiable on the Hedera Testnet.
+5. The financed receivable is **tokenized on-chain** with Hedera's **Asset Tokenization Studio (ATS)** — issuance → compliance → trade → settlement — all verifiable on the Hedera.
 
 No human coordination in the loop: agents find, evaluate, negotiate, and finance — end to end.
 
@@ -77,8 +77,8 @@ No human coordination in the loop: agents find, evaluate, negotiate, and finance
 │                                                                          │
 │   @hashgraph/asset-tokenization-sdk · @hashgraph/sdk · HCS audit trail   │
 └───────────────────────────────────────┬──────────────────────────────────┘
-                                        │
-                                  Hedera Testnet 🌐
+                                       
+                                  
 ```
 
 ## 🤖 The Agents
@@ -91,15 +91,6 @@ No human coordination in the loop: agents find, evaluate, negotiate, and finance
 
 ---
 
-## 🏆 Bounties & Tracks — ETHOnline 2026
-
-| # | Bounty | How Factora qualifies |
-|---|--------|------------------------|
-| 1 | **World ID — Selfie Check** | Selfie Check as identity/risk signal + Sybil-resistance on proposals |
-| 2 | **Hedera — AI & Agentic Payments on Hedera** | Gated API service with x402 on Hedera, settled via Blocky402 facilitator |
-| 3 | **Hedera — Tokenization of Anything** | Receivables/cashflow tokenization with ATS (issuance → compliance → trade → settlement) |
-| 4 | **The Graph — Best Use of Composable or Standardized Graph Products** | Live data from Messari Standardized Subgraphs + Subgraph MCP Engine B |
-| 5 | **The Graph — Best AI Tooling or AI Use Case with The Graph — Net-New** | The Graph as the live data layer of the AI Underwriter Agent |
 
 ### 1️⃣ World ID — Selfie Check 
 
@@ -309,16 +300,16 @@ npm run dev                    # → http://localhost:3000
 |----------|----------|-------------|
 | `PORT` | — | Main app port (default `3000`) |
 | `LOG_LEVEL` | — | `debug` \| `info` \| `warn` \| `error` |
-| `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` | ✅ | OpenAI-compatible LLM powering the Underwriter Agent |
-| `HEDERA_SERVICE_ACCOUNT_ID` | ✅ | Resource-server wallet that **receives** x402 payments |
-| `HEDERA_AGENT_ACCOUNT_ID` / `HEDERA_AGENT_PRIVATE_KEY` | ✅ | Payer-agent wallet (must hold testnet HBAR) |
+| `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` |  | OpenAI-compatible LLM powering the Underwriter Agent |
+| `HEDERA_SERVICE_ACCOUNT_ID` |  | Resource-server wallet that **receives** x402 payments |
+| `HEDERA_AGENT_ACCOUNT_ID` / `HEDERA_AGENT_PRIVATE_KEY` |  | Payer-agent wallet (must hold testnet HBAR) |
 | `X402_NETWORK` | — | `hedera:testnet` (default) \| `hedera:mainnet` |
 | `X402_FACILITATOR_URL` | — | Blocky402 facilitator override (auto-derived from network) |
 | `PROPOSAL_PRICE_TINYBAR` | — | Price for `POST /api/proposals` (default `100000` = 0.001 HBAR) |
 | `SMART_REPORT_*` | — | Per-token metered pricing for the AI smart report |
-| `HEDERA_SERVICE_URL` | ✅ | ATS sidecar base URL (`http://localhost:3001`) |
-| `GRAPH_API_KEY` | ✅ | The Graph Gateway key ([Subgraph Studio](https://thegraph.com/studio/)) |
-| `WORLD_RP_ID` / `WORLD_RP_SIGNING_KEY` | ✅ | World ID relying-party credentials for Selfie Check |
+| `HEDERA_SERVICE_URL` |  | ATS sidecar base URL (`http://localhost:3001`) |
+| `GRAPH_API_KEY` |  | The Graph Gateway key ([Subgraph Studio](https://thegraph.com/studio/)) |
+| `WORLD_RP_ID` / `WORLD_RP_SIGNING_KEY` |  | World ID relying-party credentials for Selfie Check |
 
 The sidecar keeps its own config in `hedera/.env` (operator account and network settings).
 
@@ -335,7 +326,7 @@ The sidecar keeps its own config in `hedera/.env` (operator account and network 
 
 ---
 
-## ✅ Tests & Checks
+##  Tests & Checks
 
 ```bash
 # Main app
