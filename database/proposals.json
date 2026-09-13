@@ -255,7 +255,7 @@
   },
   {
     "id": "7ee16663-7a78-419d-a0fd-5ff12edb0402",
-    "proposerAddress": "0x08e4c4837ad07819ea8978d08560d56de9390db0",
+    "proposerAddress": "0x0000000000000000000000000000000000000095",
     "amount": 750000,
     "requiredAmount": 728206,
     "returnDateInDays": 75,
@@ -1890,7 +1890,7 @@
   },
   {
     "id": "sample-048",
-    "proposerAddress": "0x0000000000000000000000000000000000000048",
+    "proposerAddress": "0x0000000000000000000000000000000000000095",
     "amount": 58000,
     "requiredAmount": 57000,
     "returnDateInDays": 240,
@@ -3712,7 +3712,7 @@
     "requiredAmount": 103000,
     "returnDateInDays": 45,
     "apy": 7.87,
-    "status": "PENDING",
+    "status": "ACCEPTED",
     "createdAt": "2026-08-26T00:00:00.000Z",
     "debtDocument": {
       "debtType": "ACCOUNT_RECEIVABLE",
@@ -3742,6 +3742,10 @@
       ],
       "reviewedAt": "2026-09-01T00:00:00.000Z",
       "model": "sample-seed-underwriter-v1"
+    },
+    "buyerSignature": {
+      "nullifier": "0x1fd09b1b7bbc6d1e7579d07216f2c5dea9805a3711a2248a87b259f072211633",
+      "signedAt": "2026-09-13T15:07:37.900Z"
     }
   },
   {
@@ -3798,12 +3802,12 @@
   },
   {
     "id": "sample-096",
-    "proposerAddress": "0x0000000000000000000000000000000000000096",
+    "proposerAddress": "0x0000000000000000000000000000000000000095",
     "amount": 106000,
     "requiredAmount": 105000,
     "returnDateInDays": 75,
     "apy": 4.63,
-    "status": "PENDING",
+    "status": "ACCEPTED",
     "createdAt": "2026-08-28T00:00:00.000Z",
     "debtDocument": {
       "debtType": "CHECK",
@@ -3834,6 +3838,18 @@
       ],
       "reviewedAt": "2026-09-01T00:00:00.000Z",
       "model": "sample-seed-underwriter-v1"
+    },
+    "buyerSignature": {
+      "nullifier": "0x1d248b515338317e2e7c36a4a59354cf4bb424661b16d5ce10b382a2d7cafbbd",
+      "signedAt": "2026-09-13T15:11:19.595Z"
+    },
+    "selfieCheck": {
+      "status": "VERIFIED",
+      "nullifier": "0x1d248b515338317e2e7c36a4a59354cf4bb424661b16d5ce10b382a2d7cafbbd",
+      "action": "mandatory-selfie-check",
+      "rpId": "rp_edad427a804bd55a",
+      "authorizationId": "WORLD-0x1d248b515338317e2e7c36a4a59354cf4bb424661b16d5ce10b382a2d7cafbbd",
+      "verifiedAt": "2026-09-13T15:13:10.244Z"
     }
   },
   {

@@ -89,10 +89,10 @@ async function runAgentPaymentStream(path, payload, onStep) {
 }
 
 /* Payment-pipeline visual (invoice → sign → settle → execute). */
-function pipelineHtml() {
+function pipelineHtml(allDone) {
   const steps = ['Requesting invoice', 'Signing payment', 'Settling on Hedera', 'Executing request'];
   return `<div class="pipeline">${steps.map((s, i) => `
-    <div class="pipeline-step" data-i="${i}">
+    <div class="pipeline-step${allDone ? ' done' : ''}" data-i="${i}">
       <div class="pipeline-rail"><div class="pipeline-dot"></div>${i < steps.length - 1 ? '<div class="pipeline-line"></div>' : ''}</div>
       <div class="pipeline-label">${s}</div>
     </div>`).join('')}</div>`;
@@ -424,7 +424,7 @@ async function generateReportViaAgent() {
 }
 function finishReport(report, settlement) {
   reportData = report;
-  renderSmartReport($('smartReportContainer'), report);
+  renderSmartReport($('smartReportContainer'), report, settlement);
   const usage = report.usage;
   const usageEl = $('reportUsage');
   if (usageEl) {
@@ -433,7 +433,7 @@ function finishReport(report, settlement) {
       : 'per-token billing';
     usageEl.classList.remove('hidden');
   }
-  $('reportMeta').innerHTML = `Criteria: ${esc(criteriaLine())}${settlement ? ' · ' + settlementText(settlement) : ''} · Generated ${new Date().toLocaleTimeString()}`;
+  $('reportMeta').innerHTML = `Criteria: ${esc(criteriaLine())} · Generated ${new Date().toLocaleTimeString()}`;
   $('reportMeta').classList.remove('hidden');
   $('smartReportSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
   devlog('AI credit report rendered (' + report.count + ' evaluated)', 'ok');
@@ -463,7 +463,7 @@ function gaugeSvg(score) {
     <text class="gauge-num" x="30" y="35" text-anchor="middle" data-target="${score}">0</text>
   </svg>`;
 }
-function renderSmartReport(container, report) {
+function renderSmartReport(container, report, settlement) {
   const mb = report.marketBenchmark || {};
   const results = report.results || [];
   const scores = results.map((r) => Number(r.evaluation && r.evaluation.fitScore) || 0);
@@ -474,6 +474,9 @@ function renderSmartReport(container, report) {
   const market = marketApyStats(mb);
 
   container.innerHTML = `
+    ${settlement ? `
+    ${pipelineHtml(true)}
+    <p class="meta-line" style="margin:10px 0 18px;">${settlementText(settlement)}</p>` : ''}
     <div class="report-strip">
       <div class="report-stat tone-cyan"><span class="metric-label">Matches evaluated</span><span class="report-stat-value">${report.count}</span><span class="report-stat-sub">passed hard filter</span></div>
       <div class="report-stat tone-gold"><span class="metric-label">Best fit score</span><span class="report-stat-value">${best}</span><span class="report-stat-sub">out of 100</span></div>
@@ -620,6 +623,15 @@ async function publishViaAgent() {
   }
 }
 
+function gradeClass(quality) {
+  switch (quality) {
+    case 'A': return 'grade-a';
+    case 'B': return 'grade-b';
+    case 'C': return 'grade-c';
+    case 'DO_NOT_BUY': return 'grade-dnb';
+    default: return 'grade-unknown';
+  }
+}
 function renderEvaluationCard(item, index) {
   const p = item.proposal;
   const ev = item.evaluation || {};
@@ -639,8 +651,17 @@ function renderEvaluationCard(item, index) {
       <p class="evaluation-rec">${esc(ev.recommendation || 'No recommendation recorded.')}</p>
       ${da.status ? `
       <div class="debt-review">
-        <b>Debt document review</b> — ${esc(da.status)} · collection confidence <b>${Number.isFinite(Number(da.collectionConfidenceScore)) ? da.collectionConfidenceScore : 0}/100</b> · debt quality <b>${esc(da.debtQuality || 'UNKNOWN')}</b><br/>
-        ${esc(da.underwriterComment || '')}
+        <div class="debt-review-head"><b>Debt document review</b><span class="pill ${da.status === 'COMPLETED' ? 'pill-verified' : 'pill-pending'}">${esc(da.status)}</span></div>
+        <div class="debt-meter-row">
+          <span class="debt-meter-label">Collection confidence</span>
+          <div class="debt-meter"><div class="debt-meter-fill" style="width:${Number.isFinite(Number(da.collectionConfidenceScore)) ? Math.max(0, Math.min(100, Number(da.collectionConfidenceScore))) : 0}%"></div></div>
+          <span class="debt-meter-value">${Number.isFinite(Number(da.collectionConfidenceScore)) ? da.collectionConfidenceScore : 0}<small>/100</small></span>
+        </div>
+        <div class="debt-meter-row">
+          <span class="debt-meter-label">Debt quality</span>
+          <span class="grade-badge ${gradeClass(da.debtQuality)}">${esc(da.debtQuality || 'UNKNOWN')}</span>
+        </div>
+        ${da.underwriterComment ? `<p class="debt-comment">${esc(da.underwriterComment)}</p>` : ''}
         ${da.keyRisks && da.keyRisks.length ? `<div class="risk-note">Key risks: ${esc(da.keyRisks.join('; '))}</div>` : ''}
         ${da.missingEvidence && da.missingEvidence.length ? `<div class="risk-note">Missing evidence: ${esc(da.missingEvidence.join('; '))}</div>` : ''}
       </div>` : ''}
@@ -1118,35 +1139,52 @@ async function intelPay() {
     const final = await runAgentPaymentStream('/api/graph/insights', {}, (evt) =>
       updatePipeline($('intelPayment'), evt.step, evt.status, evt.detail));
     if (!final.ok || !final.data) throw new Error(final.error || 'Agent payment failed');
-    await settleThenReplace($('intelPayment'), () => renderIntel(final.data, final.settlement));
+    await settleThenReplace($('intelPayment'), () => {
+      renderIntel(final.data);
+      // The tx line belongs directly under the (already all-green) pipeline
+      // rail in #intelPayment — not inside #intelOutput, which would
+      // duplicate the rail.
+      if (final.settlement) {
+        $('intelPayment').insertAdjacentHTML('beforeend',
+          `<p class="meta-line" style="margin:10px 0 0;">${settlementText(final.settlement)}</p>`);
+      }
+    });
   } catch (err) {
     status.classList.remove('hidden');
     status.textContent = '⚠ ' + err.message;
   }
 }
-function renderAiTopPicks(benchmarks) {
-  const ranked = [...benchmarks]
-    .filter((b) => b.maxSupplyApyPct > 0)
-    .sort((a, b) => (b.maxSupplyApyPct - a.maxSupplyApyPct) || (b.averageSupplyApyPct - a.averageSupplyApyPct))
-    .slice(0, 4);
-  if (!ranked.length) return '';
+function renderAiTopPicks(market) {
+  const rates = ((market && market.detailedRates) || []).filter((r) => r.supplyApyPct > 0);
+  const aiPicks = (market && market.aiTopMarkets) || [];
+  if (!rates.length && !aiPicks.length) return '';
+  const hurdle = Number(market && market.unifiedApyPct) || 0;
+  const top = aiPicks.length ? aiPicks : [...rates].sort((a, b) => b.supplyApyPct - a.supplyApyPct).slice(0, 4);
   return `
     <div class="ai-panel" style="margin-top:16px;">
-      <div class="ai-panel-label"><span class="ai-chip">AI</span> Top 4 markets by yield ceiling — where receivables capital competes best today</div>
+      <div class="ai-panel-label"><span class="ai-chip">AI</span> AI-selected top 4 markets — the analyst model's venues for parking receivables capital today</div>
       <div class="picks-grid">
-        ${ranked.map((b, i) => `
+        ${top.map((r, i) => {
+          const delta = (r.supplyApyPct - hurdle).toFixed(2);
+          const above = Number(delta) >= 0;
+          const fallbackWhy = above
+            ? `Pays ${delta} pts <strong>above</strong> the ${hurdle.toFixed(2)}% platform hurdle rate — the strongest venue for parking receivables capital in this asset.`
+            : `${Math.abs(Number(delta))} pts below the ${hurdle.toFixed(2)}% platform hurdle rate — track it for rate improvements.`;
+          return `
         <div class="pick-card">
-          <div class="pick-rank">PICK #${i + 1}${i === 0 ? ' · BEST CEILING' : ''}</div>
-          <div class="pick-symbol">${esc(b.symbol)}</div>
-          <div class="pick-apy">${b.maxSupplyApyPct}%</div>
-          <span class="pick-sub">max supply APY · avg ${b.averageSupplyApyPct}% · ${b.marketsCount} venue${b.marketsCount === 1 ? '' : 's'}</span>
-          <div class="pick-why">Yield ceiling of ${b.maxSupplyApyPct}% across ${b.marketsCount} live venue${b.marketsCount === 1 ? '' : 's'} — deepest liquidity on ${esc(b.topMarket)}. Floor sits at ${b.minSupplyApyPct}%, so venue selection matters.</div>
-        </div>`).join('')}
+          <div class="pick-rank">PICK #${i + 1}${i === 0 ? ' · AI TOP PICK' : ''}</div>
+          <div class="pick-symbol">${esc(r.symbol)}</div>
+          <span class="pick-venue">${esc(r.protocol)} · ${esc(r.chain)}</span>
+          <div class="pick-apy">${r.supplyApyPct}%</div>
+          <span class="pick-sub">supply APY${r.totalValueLockedUSD ? ` · TVL $${Math.round(r.totalValueLockedUSD).toLocaleString()}` : ''}</span>
+          <div class="pick-why">${r.rationale ? esc(r.rationale) : fallbackWhy}</div>
+        </div>`;
+        }).join('')}
       </div>
-      <p class="meta-line" style="margin-top:12px;">Ranked by maximum supply APY across tracked venues (average APY as tie-breaker) — a deterministic screen over the live feed, not investment advice.</p>
+      <p class="meta-line" style="margin-top:12px;">Selected by the AI analyst from ${(market.detailedRates || []).length} live markets — it weighs supply APY, reward inflation and TVL liquidity (not a raw sort), with its reasoning shown per pick. Not investment advice.</p>
     </div>`;
 }
-function renderIntel(data, settlement) {
+function renderIntel(data) {
   const m = data.market || {};
   const benchmarks = m.benchmarks || [];
   const best = benchmarks.reduce((a, b) => ((b.maxSupplyApyPct || 0) > (a.maxSupplyApyPct || 0) ? b : a), { maxSupplyApyPct: -1, topMarket: '—', symbol: '—' });
@@ -1158,8 +1196,7 @@ function renderIntel(data, settlement) {
       <div class="report-stat tone-gold"><span class="metric-label">Max supply APY</span><span class="report-stat-value">${best.maxSupplyApyPct > 0 ? best.maxSupplyApyPct + '%' : '—'}</span><span class="report-stat-sub">${best.maxSupplyApyPct > 0 ? esc(best.symbol) + ' · ' + esc(best.topMarket) : ''}</span></div>
       <div class="report-stat tone-cyan"><span class="metric-label">Markets tracked</span><span class="report-stat-value">${(m.detailedRates || []).length}</span><span class="report-stat-sub">${benchmarks.length} benchmark assets</span></div>
     </div>
-    ${renderAiTopPicks(benchmarks)}
-    ${settlement ? `<p class="meta-line" style="margin:14px 0 0;">${settlementText(settlement)}</p>` : ''}
+    ${renderAiTopPicks(m)}
     ${review ? `
     <div class="ai-panel">
       <div class="ai-panel-label"><span class="ai-chip">AI</span> Market review — AI-assessed hurdle rate for receivables capital</div>
@@ -1342,6 +1379,32 @@ async function devInspectorPay() {
   }
 }
 
+/* ── Server log tail (Developer console) ──────────────────────────────── */
+let serverLogLastId = 0;
+let serverLogOpen = false;
+async function pollServerLog() {
+  if (!serverLogOpen) return;
+  try {
+    const res = await fetch('/api/dev/logs?since=' + serverLogLastId);
+    const data = await res.json();
+    serverLogLastId = data.lastId || serverLogLastId;
+    const el = $('serverLog');
+    if (!el) return;
+    const state = $('serverLogState');
+    if (state) state.textContent = data.count ? `+${data.count} lines` : 'following';
+    for (const e of data.entries || []) {
+      const line = document.createElement('div');
+      line.className = 'srv-line lvl-' + e.level;
+      const ts = new Date(e.ts).toLocaleTimeString([], { hour12: false });
+      line.innerHTML = `<span class="log-t">${ts}</span> <span class="srv-scope">[${esc(e.scope)}]</span> ${esc(e.message)}`;
+      const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
+      el.appendChild(line);
+      while (el.childElementCount > 300) el.removeChild(el.firstChild);
+      if (atBottom) el.scrollTop = el.scrollHeight;
+    }
+  } catch { /* sidecar/app unreachable — leave the pane as-is */ }
+}
+
 /* ═══════════════════════ EVENT WIRING & INIT ═══════════════════════ */
 function wireEvents() {
   // Markets
@@ -1385,11 +1448,16 @@ function wireEvents() {
     const open = !drawer.classList.contains('open');
     drawer.classList.toggle('open', open);
     drawer.setAttribute('aria-hidden', String(!open));
-    if (open) runAllDiagnostics();
+    serverLogOpen = open;
+    if (open) {
+      runAllDiagnostics();
+      pollServerLog();
+    }
   });
   $('devCloseBtn').addEventListener('click', () => {
     $('devDrawer').classList.remove('open');
     $('devDrawer').setAttribute('aria-hidden', 'true');
+    serverLogOpen = false;
   });
   $('devRunAll').addEventListener('click', runAllDiagnostics);
   $('devInspectBtn').addEventListener('click', devInspect);
@@ -1422,6 +1490,7 @@ async function init() {
   Promise.all([checkServerHealth(), checkAgentStatus(), checkAtsHealth()]);
   setInterval(() => { checkServerHealth(); checkAtsHealth(); }, 15000);
   setInterval(checkAgentStatus, 30000);
+  setInterval(pollServerLog, 2500);
   window.addEventListener('focus', () => { checkServerHealth(); checkAgentStatus(); checkAtsHealth(); });
   window.addEventListener('online', () => { checkServerHealth(); checkAgentStatus(); checkAtsHealth(); });
 }

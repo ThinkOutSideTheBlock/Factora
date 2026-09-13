@@ -13,8 +13,16 @@ import { createLogger } from "../common/logger.js";
 
 const log = createLogger("market-review");
 
+export interface AiTopMarket {
+    protocol: string;
+    chain: string;
+    symbol: string;
+    supplyApyPct: number;
+    rationale: string;
+}
+
 export interface MarketReviewResult {
-    review: string | null;
+    review: string;
     /**
      * AI-assessed "medium" (median-style) DeFi hurdle rate in percent — a
      * realistic representative rate across the supplied market list, unlike
@@ -22,7 +30,21 @@ export interface MarketReviewResult {
      * did not provide one.
      */
     mediumApyPct: number | null;
+    /**
+     * The AI analyst's four venue-level picks (protocol · chain · asset) for
+     * parking idle factoring capital, each with a one-sentence rationale.
+     * Selected BY the LLM from the live graph data — not ranked in code.
+     */
+    topMarkets: AiTopMarket[];
 }
+
+const TopMarketSchema = z.object({
+    protocol: z.string().trim().min(1),
+    chain: z.string().trim().min(1),
+    symbol: z.string().trim().min(1),
+    supplyApyPct: z.number().min(0).max(1000),
+    rationale: z.string().trim().min(1).max(300),
+});
 
 const MarketReviewSchema = z.object({
     review: z.string().trim().min(1).max(1200),
@@ -32,6 +54,7 @@ const MarketReviewSchema = z.object({
         .max(100)
         .nullish()
         .transform((v) => (typeof v === "number" && Number.isFinite(v) ? v : null)),
+    topMarkets: z.array(TopMarketSchema).max(4).nullish().transform((v) => v ?? []),
 });
 
 const MARKET_REVIEW_SYSTEM_PROMPT = `You are the market analyst for Factora, an invoice-factoring marketplace.
@@ -69,8 +92,15 @@ should demand on Factora. Anchor every number in the supplied data; never invent
 Name the strongest stablecoin market by protocol, chain, and asset. Neutral,
 professional tone. No disclaimers.
 
+Your third job: select topMarkets — EXACTLY 4 venue-level markets (protocol + chain +
+asset) where idle factoring capital earns the most today, chosen by YOU from the live
+rows (marketRatesPct plus mcpOpportunities when meaningful). Rank by real earning
+potential: supply APY first, but penalize reward-inflated outliers and consider TVL as
+a liquidity signal. For each pick write a one-sentence rationale grounded in that row's
+data (APY, TVL, why it beats the medium hurdle rate). Never invent markets or rates.
+
 Respond with strict JSON of exactly this shape and nothing else:
-{"review": "<your 2-4 sentence market review>", "mediumApyPct": <number>}`;
+{"review": "<your 2-4 sentence market review>", "mediumApyPct": <number>, "topMarkets": [{"protocol": "<name>", "chain": "<network>", "symbol": "<asset>", "supplyApyPct": <number>, "rationale": "<one sentence>"}]}`;
 
 export function buildMarketReviewPrompt(marketData: GraphMarketData): string {
     const benchmarks = Object.entries(marketData.messari?.benchmarks ?? {}).map(
@@ -112,27 +142,27 @@ export function buildMarketReviewPrompt(marketData: GraphMarketData): string {
 }
 
 /**
- * Generates the market review + AI-assessed medium hurdle rate. Returns nulls
- * when the LLM is unavailable/invalid — never throws, callers degrade softly.
+ * Generates the market review, the AI-assessed medium hurdle rate, and the
+ * AI's top-4 venue picks. Throws when the LLM is unavailable — the paid
+ * report/intelligence products are AI-native, so a degraded response without
+ * AI is never shipped; the buyer gets an actionable error instead.
  */
 export async function generateMarketReview(
     marketData: GraphMarketData,
 ): Promise<MarketReviewResult> {
-    try {
-        log.info("Generating AI market review");
-        const { data } = await callLlmJsonWithUsage({
-            systemPrompt: MARKET_REVIEW_SYSTEM_PROMPT,
-            userPrompt: buildMarketReviewPrompt(marketData),
-        });
-        const parsed = MarketReviewSchema.parse(data);
-        log.info(
-            `AI market review OK · medium hurdle rate ${parsed.mediumApyPct ?? "n/a"}%`,
-        );
-        return { review: parsed.review, mediumApyPct: parsed.mediumApyPct };
-    } catch (error) {
-        log.warn(
-            `Market review unavailable, shipping report without it: ${error instanceof Error ? error.message : error}`,
-        );
-        return { review: null, mediumApyPct: null };
-    }
+    log.info("Generating AI market review");
+    const { data } = await callLlmJsonWithUsage({
+        systemPrompt: MARKET_REVIEW_SYSTEM_PROMPT,
+        userPrompt: buildMarketReviewPrompt(marketData),
+    });
+    const parsed = MarketReviewSchema.parse(data);
+    log.info(
+        `AI market review OK · medium hurdle rate ${parsed.mediumApyPct ?? "n/a"}% · ` +
+            `${parsed.topMarkets.length} AI market pick(s)`,
+    );
+    return {
+        review: parsed.review,
+        mediumApyPct: parsed.mediumApyPct,
+        topMarkets: parsed.topMarkets,
+    };
 }

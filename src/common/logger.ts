@@ -48,8 +48,26 @@ function emit(level: LogLevel, scope: string, message: string, meta?: unknown): 
     }
     const out = level === "error" ? console.error : level === "warn" ? console.warn : console.log;
     out(line);
-    // Mirror into the ring buffer so the Developer console can tail activity.
-    pushLogEntry(level, scope, message.replace(/\x1b\[[0-9;]*m/g, ""));
+    // Mirror the FULL line (message + meta, ANSI-stripped) into the ring buffer
+    // so the Developer console's Server-log pane shows exactly what the
+    // terminal prints — error details included.
+    let ringMessage = message.replace(/\x1b\[[0-9;]*m/g, "");
+    if (meta !== undefined) {
+        if (meta instanceof Error) {
+            ringMessage += ` — ${meta.name}: ${meta.message}`;
+            const stack = meta.stack;
+            if (stack) ringMessage += ` ${stack.split("\n").slice(1, 4).join(" | ").trim()}`;
+        } else if (typeof meta === "object") {
+            try {
+                ringMessage += ` ${JSON.stringify(meta)}`;
+            } catch {
+                ringMessage += " [unserializable meta]";
+            }
+        } else {
+            ringMessage += ` ${String(meta)}`;
+        }
+    }
+    pushLogEntry(level, scope, ringMessage.replace(/\x1b\[[0-9;]*m/g, ""));
 }
 
 export interface Logger {

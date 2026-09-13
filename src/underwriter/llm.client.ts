@@ -1,7 +1,56 @@
 import OpenAI from "openai";
+import fs from "node:fs";
+import path from "node:path";
 import { createLogger } from "../common/logger.js";
 
 const log = createLogger("llm");
+
+/**
+ * Hot-reloads LLM_* settings from `.env` on every call (mtime-cached).
+ *
+ * dotenv only imports `.env` once at boot, so editing LLM_MODEL (e.g. swapping
+ * the Ollama model) never reached the running process — it kept calling the
+ * previous model until a manual restart. This makes model/provider switches
+ * take effect on the next request, with a log line announcing the change.
+ */
+
+let envFileCache: { mtimeMs: number; values: Record<string, string> } | null = null;
+let lastAnnouncedModel = "";
+
+function readEnvFileValues(): Record<string, string> {
+    const envPath = path.resolve(process.cwd(), ".env");
+    try {
+        const stat = fs.statSync(envPath);
+        if (envFileCache && envFileCache.mtimeMs === stat.mtimeMs) {
+            return envFileCache.values;
+        }
+        const values: Record<string, string> = {};
+        for (const rawLine of fs.readFileSync(envPath, "utf8").split(/\r?\n/)) {
+            const line = rawLine.trim();
+            if (!line || line.startsWith("#")) continue;
+            const eq = line.indexOf("=");
+            if (eq <= 0) continue;
+            const key = line.slice(0, eq).trim();
+            let value = line.slice(eq + 1).trim();
+            if (!value.startsWith('"') && !value.startsWith("'")) {
+                const comment = value.indexOf(" #");
+                if (comment >= 0) value = value.slice(0, comment).trim();
+            }
+            values[key] = value.replace(/^["']|["']$/g, "");
+        }
+        envFileCache = { mtimeMs: stat.mtimeMs, values };
+        return values;
+    } catch {
+        return {};
+    }
+}
+
+/** `.env` value wins if present; otherwise fall back to the boot-time env. */
+function hotEnv(key: string): string | undefined {
+    const fromFile = readEnvFileValues()[key];
+    return fromFile !== undefined && fromFile !== "" ? fromFile : process.env[key];
+}
+
 
 export interface LlmJsonRequest {
     systemPrompt: string;
@@ -108,12 +157,18 @@ export async function callLlmJsonWithUsage({
     systemPrompt,
     userPrompt,
 }: LlmJsonRequest): Promise<LlmJsonResult> {
-    const baseURL = process.env.LLM_BASE_URL;
-    const apiKey = process.env.LLM_API_KEY;
-    const model = process.env.LLM_MODEL;
+    const baseURL = hotEnv("LLM_BASE_URL");
+    const apiKey = hotEnv("LLM_API_KEY");
+    const model = hotEnv("LLM_MODEL");
 
     if (!baseURL || !apiKey || !model) {
         throw new Error("LLM_BASE_URL, LLM_API_KEY, and LLM_MODEL must be configured");
+    }
+    if (model !== lastAnnouncedModel) {
+        if (lastAnnouncedModel) {
+            log.info(`LLM model switched → "${model}" (hot-reloaded from .env)`);
+        }
+        lastAnnouncedModel = model;
     }
 
     const client = new OpenAI({ baseURL, apiKey, timeout: TIMEOUT_MS, maxRetries: 1 });

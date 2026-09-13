@@ -8,7 +8,9 @@
  *   2. Engine B (mcp-market.service.ts) — additive opportunities discovered at
  *      runtime through The Graph's Subgraph MCP server.
  *   3. AI review (underwriter/market-review.ts) — a professional on-chain
- *      markets APY status review with factoring hurdle-rate guidance.
+ *      markets APY status review with factoring hurdle-rate guidance, plus the
+ *      analyst model's top-4 venue-level market picks (selected by the LLM,
+ *      not ranked in code).
  *
  * External agents pay per call with x402 and use the result as the
  * capital-cost input for their own debt analytics.
@@ -32,6 +34,18 @@ export interface GraphInsightsResponse {
     latencyMs: number;
     review: string | null;
     market: {
+        /**
+         * The AI analyst's four venue-level picks (protocol, chain, asset,
+         * supply APY, one-sentence rationale) selected BY the LLM from the
+         * live graph data — empty when the model returned none.
+         */
+        aiTopMarkets: Array<{
+            protocol: string;
+            chain: string;
+            symbol: string;
+            supplyApyPct: number;
+            rationale: string;
+        }>;
         /**
          * AI-assessed "medium" (median-style) DeFi hurdle rate, in percent —
          * the realistic capital-cost signal. Falls back to the arithmetic
@@ -89,7 +103,17 @@ export async function generateMarketInsights(): Promise<GraphInsightsResponse> {
 
 function shapeInsights(
     feed: Awaited<ReturnType<typeof getGraphFeed>>,
-    reviewResult: { review: string | null; mediumApyPct: number | null },
+    reviewResult: {
+        review: string | null;
+        mediumApyPct: number | null;
+        topMarkets: Array<{
+            protocol: string;
+            chain: string;
+            symbol: string;
+            supplyApyPct: number;
+            rationale: string;
+        }>;
+    },
     latencyMs: number,
 ): GraphInsightsResponse {
     const review = reviewResult.review;
@@ -133,6 +157,8 @@ function shapeInsights(
                     "Every tracked market: protocol, chain, asset, supply/borrow APY (%), TVL in USD.",
                 "market.mcpOpportunities[]":
                     "Additive DeFi yields dynamically discovered through the Subgraph MCP beyond the tracked set.",
+                "market.aiTopMarkets[]":
+                    "The AI analyst's four venue-level picks (protocol, chain, asset, supply APY, rationale) selected from the live rows — ranked by real earning potential, not raw APY alone.",
                 review: "AI-written market status review with factoring hurdle-rate guidance.",
             },
         },
@@ -140,6 +166,7 @@ function shapeInsights(
         latencyMs,
         review,
         market: {
+            aiTopMarkets: reviewResult.topMarkets,
             unifiedApyPct,
             averageApyPct: feed.averageMarketApy,
             marketsTracked: feed.messari.detailedRates.length,
